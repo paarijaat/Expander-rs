@@ -28,4 +28,29 @@ impl<F: Field> MultiLinearPoly<F> {
         end_timer!(timer);
         scratch[0]
     }
+
+    pub fn fix_variables(&self, partial_point: &[F::BaseField]) -> Self {
+        assert!(
+            partial_point.len() <= self.var_num,
+            "invalid size of partial point"
+        );
+
+        let mut poly = self.evals.to_vec();
+        let nv = self.var_num;
+        let dim = partial_point.len();
+        // evaluate single variable of partial point from left to right
+        for i in 1..dim + 1 {
+            let r = partial_point[i - 1];
+            for b in 0..(1 << (nv - i)) {
+                let left = poly[b << 1];
+                let right = poly[(b << 1) + 1];
+                poly[b] = left + (right - left).mul_base_elem(&r);
+            }
+        }
+        Self {
+            var_num: nv - dim,
+            evals: poly[..(1 << (nv - dim))].to_vec()
+        }
+    }
 }
+

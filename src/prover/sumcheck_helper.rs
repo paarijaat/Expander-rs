@@ -51,14 +51,14 @@ fn eq_eval_at<F: Field>(
     }
 }
 
-struct SumcheckMultilinearProdHelper {
+pub struct SumcheckMultilinearProdHelper {
     var_num: usize,
     sumcheck_var_idx: usize,
     cur_eval_size: usize,
 }
 
 impl SumcheckMultilinearProdHelper {
-    fn new(var_num: usize) -> Self {
+    pub fn new(var_num: usize) -> Self {
         SumcheckMultilinearProdHelper {
             var_num,
             sumcheck_var_idx: 0,
@@ -66,7 +66,7 @@ impl SumcheckMultilinearProdHelper {
         }
     }
 
-    fn poly_eval_at<F: VectorizedField>(
+    pub fn poly_eval_at<F: VectorizedField>(
         &self,
         var_idx: usize,
         degree: usize,
@@ -113,7 +113,7 @@ impl SumcheckMultilinearProdHelper {
         [p0, p1, p2]
     }
 
-    fn receive_challenge<F: VectorizedField>(
+    pub fn receive_challenge<F: VectorizedField>(
         &mut self,
         var_idx: usize,
         r: F::BaseField,

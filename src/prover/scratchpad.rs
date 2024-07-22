@@ -32,3 +32,23 @@ impl<F: Field> GkrScratchpad<F> {
         }
     }
 }
+
+
+#[derive(Clone, Debug)]
+pub struct SumcheckMultilinearProdScratchpad<F: Field> {
+    pub(crate) v_evals: Vec<F>,
+    pub(crate) hg_evals: Vec<F>,
+
+    pub(crate) gate_exists: Vec<bool>,
+}
+
+impl<F: Field> SumcheckMultilinearProdScratchpad<F> {
+    pub(crate) fn new(num_vars: usize) -> Self {
+        let num_evals = 1 << num_vars;
+        SumcheckMultilinearProdScratchpad {
+            v_evals: vec![F::default(); num_evals],
+            hg_evals: vec![F::default(); num_evals],
+            gate_exists: vec![true; num_evals],
+        }
+    }
+}

@@ -11,6 +11,7 @@ use expander_rs::{
 };
 use log::{debug, info};
 use warp::Filter;
+use std::time::Instant;
 
 fn dump_proof_and_claimed_v<F: Field + FieldSerde>(proof: &Proof, claimed_v: &[F]) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -78,10 +79,13 @@ where
             let output_file = &args[4];
             let mut circuit = Circuit::<F>::load_circuit(circuit_file);
             circuit.load_witness_file(witness_file);
+            let start = Instant::now();
             circuit.evaluate();
             let mut prover = Prover::new(&config);
             prover.prepare_mem(&circuit);
             let (claimed_v, proof) = prover.prove(&circuit);
+            let duration = start.elapsed();
+            info!("Proof generation time: {:?}", duration);
             let bytes = dump_proof_and_claimed_v(&proof, &claimed_v);
             fs::write(output_file, bytes).expect("Unable to write proof to file.");
         }
