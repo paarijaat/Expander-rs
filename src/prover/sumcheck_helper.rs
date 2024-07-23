@@ -51,6 +51,7 @@ fn eq_eval_at<F: Field>(
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SumcheckMultilinearProdHelper {
     var_num: usize,
     sumcheck_var_idx: usize,

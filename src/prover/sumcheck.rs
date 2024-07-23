@@ -81,95 +81,70 @@ where
 
 
 pub fn sumcheck_multilinear_prod<F>(
-    m1: &mut MultiLinearPoly<F>,
-    m2: &mut MultiLinearPoly<F>,
     transcript: &mut Transcript,
     sp: &mut SumcheckMultilinearProdScratchpad<F>,
-    init_v: &[F],
 ) -> (Vec<F::BaseField>, (F,F))
 where
     F: VectorizedField + FieldSerde,
     F::PackedBaseField: Field<BaseField = F::BaseField>,
 {
-    let mut randomness_during_sumcheck = Vec::<F::BaseField>::new();
+    let mut randomness_sumcheck = Vec::<F::BaseField>::new();
     let mut claimed_evals_m1_m2 = (F::zero(), F::zero());
-    let mut helper = SumcheckMultilinearProdHelper::new(m1.var_num);
 
-    for i_var in 0..m1.var_num {
-        /* 
-        fn poly_eval_at<F: VectorizedField>(
-            &self,
-            var_idx: usize,
-            degree: usize,
-            bk_f: &mut [F],
-            bk_hg: &mut [F],
-            init_v: &[F],
-            gate_exists: &[bool],
-        ) -> [F; 3]
-        */
-        let evals = helper.poly_eval_at::<F>(
+    for i_var in 0..sp.num_vars {
+        // Computes the three values (evaluations of the poly for the verifier)
+        let evals = sp.helper.poly_eval_at::<F>(
             i_var, 
             2, 
-            m1.evals.as_mut_slice(),
-            m2.evals.as_mut_slice(),
-            init_v, // TODO fix this
-            &sp.gate_exists
+            sp.poly1.evals.as_mut_slice(),
+            sp.poly2.evals.as_mut_slice(),
+            &sp.init_v, // TODO: fix this, why do we need to send this
+            &sp.gate_exists  // TODO: fix this, why do we need to send this
         );
 
+        // Append the poly sent to verifier to the transcript
         transcript.append_f(evals[0]);
         transcript.append_f(evals[1]);
         transcript.append_f(evals[2]);
 
+        // Create the next randomness (fiat-shamir)
         let r = transcript.challenge_f::<F>();
-        randomness_during_sumcheck.push(r.clone());
-        /*
-            fn receive_challenge<F: VectorizedField>(
-                &mut self,
-                var_idx: usize,
-                r: F::BaseField,
-                bk_f: &mut [F],
-                bk_hg: &mut [F],
-                init_v: &[F],
-                gate_exists: &mut [bool],
-            ) where
-                F::PackedBaseField: Field<BaseField = F::BaseField>,
-        */
-        helper.receive_challenge::<F>(
+        randomness_sumcheck.push(r.clone());
+
+        // Fix the next variable using the fiat-shamir randomness
+        sp.helper.receive_challenge::<F>(
             i_var, 
             r, 
-            m1.evals.as_mut_slice(), 
-            m2.evals.as_mut_slice(),
-            init_v, // TODO fix this
-            &mut sp.gate_exists
+            sp.poly1.evals.as_mut_slice(), 
+            sp.poly2.evals.as_mut_slice(),
+            &sp.init_v, // TODO: fix this, why do we need to send this
+            &mut sp.gate_exists  // TODO: fix this, why do we need to send this
         );
     }
 
     // Claimed evaluations of m1 and m2
     // log::trace!("vx claim: {:?}", helper.vx_claim());
-    claimed_evals_m1_m2.0 = m1.evals[0].clone();
-    transcript.append_f(m1.evals[0]);
+    claimed_evals_m1_m2.0 = sp.poly1.evals[0].clone();
+    transcript.append_f(claimed_evals_m1_m2.0);
 
     // log::trace!("claimed vy[{}] = {:?}", j, helper.vy_claim());
-    claimed_evals_m1_m2.1 = m2.evals[0].clone();
-    transcript.append_f(m2.evals[0]);
+    claimed_evals_m1_m2.1 = sp.poly2.evals[0].clone();
+    transcript.append_f(claimed_evals_m1_m2.1);
 
-    (randomness_during_sumcheck, claimed_evals_m1_m2)
+    (randomness_sumcheck, claimed_evals_m1_m2)
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arith::{Field, VectorizedFr};
+    use arith::VectorizedFr;
     type F = VectorizedFr;
 
     #[test]
     fn sumcheck_multilinear_prod_test() {
         let num_vars: usize = 2;
         //let config = Config::bn254_config();
-
-        let mut sp = SumcheckMultilinearProdScratchpad::<F>::new(num_vars);
-        let mut tp = Transcript::new();
 
         let evals1 = vec![
             F::from(4 as u32),  // f(0,0)
@@ -178,7 +153,7 @@ mod tests {
             F::from(25 as u32)  // f(1,1)
         ];
 
-        let mut poly1 = MultiLinearPoly {
+        let poly1 = MultiLinearPoly {
             var_num: num_vars,
             evals: evals1.clone()
         };
@@ -190,20 +165,17 @@ mod tests {
             F::from(1 as u32)  // f(1,1)
         ];
 
-        let mut poly2 = MultiLinearPoly {
+        let poly2 = MultiLinearPoly {
             var_num: num_vars,
             evals: evals2.clone()
         };
 
-        // let mut p1 = F::zero();
-        // let mut p2 = F::zero();
+        let mut sp = SumcheckMultilinearProdScratchpad::<F>::new(&poly1, &poly2);
+        let mut tp = Transcript::new();
 
         let (randomness_sumcheck, (p1,p2)) = sumcheck_multilinear_prod(
-            &mut poly1, 
-            &mut poly2,
             &mut tp, 
             &mut sp,
-            &evals1.clone()
         );
 
         let v1 = MultiLinearPoly::<F>::eval_multilinear(
