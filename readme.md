@@ -17,11 +17,8 @@ For more information, see the cpp version of the repo [here](https://github.com/
 Before executing setup, please make sure you read through the system requirements, and make sure your CPU is in the list.
 
 ```sh
-wget -P data https://storage.googleapis.com/keccak8/ExtractedCircuitMul.txt
-wget -P data https://storage.googleapis.com/keccak8/ExtractedCircuitAdd.txt
-wget -P data https://storage.googleapis.com/keccak8/circuit8.txt
-wget -P data/compiler_out https://storage.googleapis.com/keccak8/circuit.txt
-wget -P data/compiler_out https://storage.googleapis.com/keccak8/witness.txt
+wget -P data https://storage.googleapis.com/keccak8/circuit.txt
+wget -P data https://storage.googleapis.com/keccak8/witness.txt
 ```
 
 
@@ -32,13 +29,13 @@ wget -P data/compiler_out https://storage.googleapis.com/keccak8/witness.txt
 Command template:
 
 ```sh
-RUSTFLAGS="-C target-cpu=native" RUSTFLAGS="-C target-feature=+avx2" cargo run --release -- -f [254|31] -t [#threads]
+RUSTFLAGS="-C target-cpu=native" RUSTFLAGS="-C target-feature=+avx2" cargo run --release -- -f [fr|m31|m31ext3] -t [#threads] -s [keccak|poseidon]
 ```
 
 Concretely if you are running on a 16 physical core CPU for Bn256 scalar field:
 
 ```sh
-RUSTFLAGS="-C target-cpu=native" cargo run --release -- -f 254 -t 16
+RUSTFLAGS="-C target-cpu=native" cargo run --release -- -f fr -t 16
 ```
 
 ## Correctness test
@@ -63,9 +60,9 @@ RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- serv
 Example:
 
 ```sh
-RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- prove ./data/compiler_out/circuit.txt ./data/compiler_out/witness.txt ./data/compiler_out/out.bin
-RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- verify ./data/compiler_out/circuit.txt ./data/compiler_out/witness.txt ./data/compiler_out/out.bin
-RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- serve ./data/compiler_out/circuit.txt 127.0.0.1 3030
+RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- prove ./data/circuit.txt ./data/witness.txt ./data/out.bin
+RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- verify ./data/circuit.txt ./data/witness.txt ./data/out.bin
+RUSTFLAGS="-C target-cpu=native" cargo run --bin expander-exec --release -- serve ./data/circuit.txt 127.0.0.1 3030
 ```
 
 To test the service started by `expander-exec serve`, you can use the following command:

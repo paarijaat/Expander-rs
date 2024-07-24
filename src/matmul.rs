@@ -1,7 +1,7 @@
 use std::vec;
 
 use halo2curves::bn256::Fr;
-use arith::{Field, VectorizedFr};
+
 use log::info;
 // use ark_std::{start_timer, end_timer};
 use arith::MultiLinearPoly;

@@ -4,9 +4,9 @@ use arith::{Field, VectorizedM31};
 use expander_rs::{Circuit, Config, Prover, Verifier};
 use rand::Rng;
 
-const FILENAME_CIRCUIT: &str = "data/compiler_out/circuit.txt";
-const FILENAME_WITNESS: &str = "data/compiler_out/witness.txt";
-const FILENAME_PROOF: &str = "data/compiler_out/proof.bin";
+const FILENAME_CIRCUIT: &str = "data/circuit.txt";
+const FILENAME_WITNESS: &str = "data/witness.txt";
+const FILENAME_PROOF: &str = "data/proof.bin";
 
 type F = VectorizedM31;
 
@@ -43,4 +43,19 @@ fn test_compiler_format_integration() {
     bad_proof.bytes[random_idx] += random_change;
     assert!(!verifier.verify(&circuit, &claimed_v, &bad_proof));
     println!("Bad proof rejected.");
+}
+
+#[test]
+fn test_compiler_format_integration_no_prove() {
+    println!("Config created.");
+    let mut circuit = Circuit::<F>::load_circuit(FILENAME_CIRCUIT);
+    println!("Circuit loaded.");
+    circuit.load_witness_file(FILENAME_WITNESS);
+    println!("Witness loaded.");
+    circuit.evaluate();
+    println!("Circuit evaluated.");
+    // check last layer first output
+    let last_layer = circuit.layers.last().unwrap();
+    let last_layer_first_output = last_layer.output_vals.evals[0];
+    assert_eq!(last_layer_first_output, F::zero());
 }

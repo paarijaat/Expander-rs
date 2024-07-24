@@ -1,24 +1,22 @@
-use arith::{Field, FieldSerde, VectorizedField};
+use arith::{FiatShamirConfig, Field, FieldSerde, MultiLinearPoly};
 
-use crate::{CircuitLayer, Config, GkrScratchpad, SumcheckMultilinearProdScratchpad, SumcheckGkrHelper, SumcheckMultilinearProdHelper, Transcript};
-use arith::MultiLinearPoly;
+use crate::{CircuitLayer, Config, GkrScratchpad, SumcheckMultilinearProdScratchpad, SumcheckGkrHelper, Transcript};
 
 // FIXME
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn sumcheck_prove_gkr_layer<F>(
     layer: &CircuitLayer<F>,
-    rz0: &[Vec<F::BaseField>],
-    rz1: &[Vec<F::BaseField>],
-    alpha: &F::BaseField,
-    beta: &F::BaseField,
+    rz0: &[Vec<F::ChallengeField>],
+    rz1: &[Vec<F::ChallengeField>],
+    alpha: &F::ChallengeField,
+    beta: &F::ChallengeField,
     transcript: &mut Transcript,
     sp: &mut [GkrScratchpad<F>],
     config: &Config,
-) -> (Vec<Vec<F::BaseField>>, Vec<Vec<F::BaseField>>)
+) -> (Vec<Vec<F::ChallengeField>>, Vec<Vec<F::ChallengeField>>)
 where
-    F: VectorizedField + FieldSerde,
-    F::PackedBaseField: Field<BaseField = F::BaseField>,
+    F: Field + FieldSerde + FiatShamirConfig,
 {
     let mut helpers = vec![];
     assert_eq!(config.get_num_repetitions(), sp.len());
@@ -83,12 +81,11 @@ where
 pub fn sumcheck_multilinear_prod<F>(
     transcript: &mut Transcript,
     sp: &mut SumcheckMultilinearProdScratchpad<F>,
-) -> (Vec<F::BaseField>, (F,F))
+) -> (Vec<F::ChallengeField>, (F,F))
 where
-    F: VectorizedField + FieldSerde,
-    F::PackedBaseField: Field<BaseField = F::BaseField>,
+    F: Field + FieldSerde + FiatShamirConfig,
 {
-    let mut randomness_sumcheck = Vec::<F::BaseField>::new();
+    let mut randomness_sumcheck = Vec::<F::ChallengeField>::new();
     let mut claimed_evals_m1_m2 = (F::zero(), F::zero());
 
     for i_var in 0..sp.num_vars {
@@ -138,8 +135,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arith::VectorizedFr;
-    type F = VectorizedFr;
+    use halo2curves::bn256::Fr;
+    type F = Fr;
 
     #[test]
     fn sumcheck_multilinear_prod_test() {
@@ -153,7 +150,7 @@ mod tests {
             F::from(25 as u32)  // f(1,1)
         ];
 
-        let poly1 = MultiLinearPoly {
+        let poly1 = MultiLinearPoly::<F> {
             var_num: num_vars,
             evals: evals1.clone()
         };
@@ -165,7 +162,7 @@ mod tests {
             F::from(1 as u32)  // f(1,1)
         ];
 
-        let poly2 = MultiLinearPoly {
+        let poly2 = MultiLinearPoly::<F> {
             var_num: num_vars,
             evals: evals2.clone()
         };
