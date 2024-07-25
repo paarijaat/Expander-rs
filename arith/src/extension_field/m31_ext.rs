@@ -1,6 +1,3 @@
-mod vectorized_m31;
-pub use vectorized_m31::VectorizedM31Ext3;
-
 use ark_std::Zero;
 use rand::RngCore;
 use std::{
@@ -11,6 +8,8 @@ use std::{
 };
 
 use crate::{mod_reduce_u32, Field, FieldSerde, M31};
+
+use super::BinomialExtensionField;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct M31Ext3 {
@@ -59,6 +58,10 @@ impl Field for M31Ext3 {
     const NAME: &'static str = "Mersenne 31 Extension 3";
 
     const SIZE: usize = 12;
+
+    const ZERO: Self = M31Ext3 {
+        v: [M31::ZERO, M31::ZERO, M31::ZERO],
+    };
 
     const INV_2: M31Ext3 = M31Ext3 {
         v: [M31::INV_2, M31 { v: 0 }, M31 { v: 0 }],
@@ -150,6 +153,32 @@ impl Field for M31Ext3 {
                 },
             ],
         }
+    }
+}
+
+impl BinomialExtensionField<3> for M31Ext3 {
+    /// Extension Field
+    const W: u32 = 5;
+
+    /// Base field for the extension
+    type BaseField = M31;
+
+    /// Multiply the extension field with the base field
+    #[inline]
+    fn mul_by_base_field(&self, base: &Self::BaseField) -> Self {
+        let mut res = self.v;
+        res[0] *= base;
+        res[1] *= base;
+        res[2] *= base;
+        Self { v: res }
+    }
+
+    /// Add the extension field with the base field
+    #[inline]
+    fn add_by_base_field(&self, base: &Self::BaseField) -> Self {
+        let mut res = self.v;
+        res[0] += base;
+        Self { v: res }
     }
 }
 
@@ -351,6 +380,7 @@ impl From<&M31Ext3> for M31 {
 // = a0*b0 + 5*(a1*b2 + a2*b1)
 // + (a0*b1 + a1*b0)*x + 5* a2*b2
 // + (a0*b2 + a1*b1 + a2*b0)*x^2
+#[inline(always)]
 fn mul_internal(a: &[M31; 3], b: &[M31; 3]) -> [M31; 3] {
     let mut res = [M31::default(); 3];
     res[0] = a[0] * b[0] + M31 { v: 5 } * (a[1] * b[2] + a[2] * b[1]);
@@ -359,6 +389,7 @@ fn mul_internal(a: &[M31; 3], b: &[M31; 3]) -> [M31; 3] {
     res
 }
 
+#[inline(always)]
 fn square_internal(a: &[M31; 3]) -> [M31; 3] {
     let mut res = [M31::default(); 3];
     res[0] = a[0].square() + M31 { v: 10 } * (a[1] * a[2]);

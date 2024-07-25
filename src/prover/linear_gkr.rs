@@ -1,20 +1,19 @@
 //! This module implements the whole GKR prover, including the IOP and PCS.
 
-use arith::{FiatShamirConfig, Field, FieldSerde};
+use arith::{BinomialExtensionField, Field, FieldSerde, SimdField};
 use ark_std::{end_timer, start_timer};
 
-use crate::{gkr_prove, Circuit, Config, GkrScratchpad, Proof, RawCommitment, Transcript};
+use crate::{
+    gkr_prove, gkr_square_prove, Circuit, Config, GkrScratchpad, Proof, RawCommitment, Transcript,
+};
 
-pub fn grind<F: Field + FieldSerde + FiatShamirConfig>(
-    transcript: &mut Transcript,
-    config: &Config,
-) {
+pub fn grind<F: Field + FieldSerde + SimdField>(transcript: &mut Transcript, config: &Config) {
     let timer = start_timer!(|| format!("grind {} bits", config.grinding_bits));
 
     let mut hash_bytes = vec![];
 
     // ceil(32/field_size)
-    let num_field_elements = (31 + F::ChallengeField::SIZE) / F::ChallengeField::SIZE;
+    let num_field_elements = (31 + F::Scalar::SIZE) / F::Scalar::SIZE;
 
     let initial_hash = transcript.challenge_fs::<F>(num_field_elements);
     initial_hash
@@ -31,12 +30,12 @@ pub fn grind<F: Field + FieldSerde + FiatShamirConfig>(
     end_timer!(timer);
 }
 
-pub struct Prover<F: Field + FieldSerde + FiatShamirConfig> {
+pub struct Prover<F: BinomialExtensionField<3> + FieldSerde + SimdField> {
     config: Config,
-    sp: Vec<GkrScratchpad<F>>,
+    sp: GkrScratchpad<F>,
 }
 
-impl<F: Field + FieldSerde + FiatShamirConfig> Prover<F> {
+impl<F: BinomialExtensionField<3> + FieldSerde + SimdField> Prover<F> {
     pub fn new(config: &Config) -> Self {
         // assert_eq!(config.field_type, crate::config::FieldType::M31);
         assert_eq!(config.fs_hash, crate::config::FiatShamirHashType::SHA256);
@@ -46,7 +45,7 @@ impl<F: Field + FieldSerde + FiatShamirConfig> Prover<F> {
         );
         Prover {
             config: config.clone(),
-            sp: Vec::new(),
+            sp: GkrScratchpad::<F>::default(),
         }
     }
 
@@ -63,12 +62,10 @@ impl<F: Field + FieldSerde + FiatShamirConfig> Prover<F> {
             .map(|layer| layer.output_var_num)
             .max()
             .unwrap();
-        self.sp = (0..self.config.get_num_repetitions())
-            .map(|_| GkrScratchpad::new(max_num_input_var, max_num_output_var))
-            .collect();
+        self.sp = GkrScratchpad::<F>::new(max_num_input_var, max_num_output_var);
     }
 
-    pub fn prove(&mut self, c: &Circuit<F>) -> (Vec<F>, Proof) {
+    pub fn prove(&mut self, c: &Circuit<F>) -> (F, Proof) {
         let timer = start_timer!(|| "prove");
         // std::thread::sleep(std::time::Duration::from_secs(1)); // TODO
 
@@ -80,9 +77,15 @@ impl<F: Field + FieldSerde + FiatShamirConfig> Prover<F> {
         let mut transcript = Transcript::new();
         transcript.append_u8_slice(&buffer);
 
-        grind::<F>(&mut transcript, &self.config);
+        let claimed_v: F;
+        let mut _rz0s = vec![];
+        let mut _rz1s = vec![];
 
-        let (claimed_v, _rz0s, _rz1s) = gkr_prove(c, &mut self.sp, &mut transcript, &self.config);
+        if self.config.gkr_square {
+            (claimed_v, _rz0s) = gkr_square_prove(c, &mut self.sp, &mut transcript, &self.config);
+        } else {
+            (claimed_v, _rz0s, _rz1s) = gkr_prove(c, &mut self.sp, &mut transcript, &self.config);
+        }
 
         // open
         match self.config.polynomial_commitment_type {

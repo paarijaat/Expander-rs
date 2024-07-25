@@ -4,17 +4,15 @@ use std::{
     thread,
 };
 
-use arith::VectorizedM31Ext3;
-use arith::{FiatShamirConfig, Field, FieldSerde, VectorizedM31};
+use arith::{BinomialExtensionField, Bn254DummyExt3, SimdM31Ext3};
+use arith::{FieldSerde, SimdField};
 use clap::Parser;
 use expander_rs::{Circuit, Config, Prover};
-use halo2curves::bn256::Fr;
 
 const KECCAK_CIRCUIT: &str = "data/circuit.txt";
 // circuit for repeating Poseidon for 120 times
 const POSEIDON_CIRCUIT: &str = "data/poseidon_120_circuit.txt";
 
-const CIRCUIT_COPY_SIZE: usize = 8;
 const M31_PACKSIZE: usize = 8;
 const FR_PACKSIZE: usize = 1;
 
@@ -44,22 +42,17 @@ fn main() {
     print_info(&args);
 
     match args.field.as_str() {
-        "m31" => run_benchmark::<VectorizedM31>(&args, Config::m31_config()),
-        "m31ext3" => run_benchmark::<VectorizedM31Ext3>(&args, Config::m31_ext3_config()),
-        "fr" => run_benchmark::<Fr>(&args, Config::bn254_config()),
+        "m31ext3" => run_benchmark::<SimdM31Ext3>(&args, Config::m31_ext3_config()),
+        "fr" => run_benchmark::<Bn254DummyExt3>(&args, Config::bn254_config()),
         _ => unreachable!(),
     };
 }
 
 fn run_benchmark<F>(args: &Args, config: Config)
 where
-    F: Field + FieldSerde + FiatShamirConfig + Send + 'static,
+    F: BinomialExtensionField<3> + FieldSerde + SimdField + Send + 'static,
 {
     println!("benchmarking keccak over {}", args.field);
-    println!(
-        "Default parallel repetition config {}",
-        config.get_num_repetitions()
-    );
 
     let partial_proof_cnts = (0..args.threads)
         .map(|_| Arc::new(Mutex::new(0)))
@@ -67,7 +60,6 @@ where
     let start_time = std::time::Instant::now();
 
     let pack_size = match args.field.as_str() {
-        "m31" => M31_PACKSIZE,
         "m31ext3" => M31_PACKSIZE,
         "fr" => FR_PACKSIZE,
         _ => unreachable!(),
@@ -77,6 +69,12 @@ where
     let circuit_template = match args.scheme.as_str() {
         "keccak" => Circuit::<F>::load_circuit(KECCAK_CIRCUIT),
         "poseidon" => Circuit::<F>::load_circuit(POSEIDON_CIRCUIT),
+        _ => unreachable!(),
+    };
+    
+    let circuit_copy_size: usize = match args.scheme.as_str() {
+        "keccak" => 8,
+        "poseidon" => 120,
         _ => unreachable!(),
     };
 
@@ -95,7 +93,12 @@ where
         .enumerate()
         .map(|(i, c)| {
             let partial_proof_cnt = partial_proof_cnts[i].clone();
-            let local_config = config.clone();
+            let mut local_config = config.clone();
+            local_config.gkr_square = match args.scheme.as_str() {
+                "keccak" => false,
+                "poseidon" => true,
+                _ => unreachable!(),
+            };
             thread::spawn(move || {
                 loop {
                     // bench func
@@ -105,7 +108,7 @@ where
                     // update cnt
                     let mut cnt = partial_proof_cnt.lock().unwrap();
 
-                    let proof_cnt_this_round = CIRCUIT_COPY_SIZE * pack_size;
+                    let proof_cnt_this_round = circuit_copy_size * pack_size;
                     *cnt += proof_cnt_this_round;
                 }
             })
@@ -122,7 +125,7 @@ where
             total_proof_cnt += *cnt.lock().unwrap();
         }
         let throughput = total_proof_cnt as f64 / duration.as_secs_f64();
-        println!("{}-bench: throughput: {} keccaks/s", i, throughput.round());
+        println!("{}-bench: throughput: {} hashes/s", i, throughput.round());
     }
 }
 
@@ -130,4 +133,5 @@ fn print_info(args: &Args) {
     println!("field:          {}", args.field);
     println!("#threads:       {}", args.threads);
     println!("#bench repeats: {}", args.repeats);
+    println!("scheme:         {}", args.scheme);
 }

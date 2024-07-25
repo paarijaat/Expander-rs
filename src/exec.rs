@@ -5,36 +5,29 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use arith::{FiatShamirConfig, Field, FieldSerde, VectorizedM31};
+use arith::{BinomialExtensionField, Field, FieldSerde, SimdField, SimdM31Ext3, Bn254DummyExt3};
 use expander_rs::{
     Circuit, Config, FieldType, Proof, Prover, Verifier, SENTINEL_BN254, SENTINEL_M31,
 };
-use halo2curves::bn256::Fr;
 
 use log::{debug, info};
 use warp::Filter;
 use std::time::Instant;
 
-fn dump_proof_and_claimed_v<F: Field + FieldSerde>(proof: &Proof, claimed_v: &[F]) -> Vec<u8> {
+fn dump_proof_and_claimed_v<F: Field + FieldSerde>(proof: &Proof, claimed_v: &F) -> Vec<u8> {
     let mut bytes = Vec::new();
 
     proof.serialize_into(&mut bytes);
-
-    let claimed_v_len = claimed_v.len();
-    (claimed_v_len as u64).serialize_into(&mut bytes);
-    claimed_v.iter().for_each(|f| f.serialize_into(&mut bytes));
+    claimed_v.serialize_into(&mut bytes);
 
     bytes
 }
 
-fn load_proof_and_claimed_v<F: Field + FieldSerde>(bytes: &[u8]) -> (Proof, Vec<F>) {
+fn load_proof_and_claimed_v<F: Field + FieldSerde>(bytes: &[u8]) -> (Proof, F) {
     let mut cursor = Cursor::new(bytes);
 
     let proof = Proof::deserialize_from(&mut cursor);
-    let claimed_v_len = u64::deserialize_from(&mut cursor) as usize;
-    let claimed_v = (0..claimed_v_len)
-        .map(|_| F::deserialize_from(&mut cursor))
-        .collect::<Vec<_>>();
+    let claimed_v = F::deserialize_from(&mut cursor);
 
     (proof, claimed_v)
 }
@@ -55,7 +48,7 @@ fn detect_field_type_from_circuit_file(circuit_file: &str) -> FieldType {
 
 async fn run_command<F>(field_type: FieldType, command: &str, circuit_file: &str, args: &[String])
 where
-    F: Field + FieldSerde + FiatShamirConfig + Send + 'static,
+    F: BinomialExtensionField<3> + FieldSerde + SimdField + Send + 'static,
 {
     let config = match field_type {
         FieldType::M31 => Config::m31_config(),
@@ -180,10 +173,10 @@ async fn main() {
     debug!("field type: {:?}", field_type);
     match field_type {
         FieldType::M31 => {
-            run_command::<VectorizedM31>(field_type, command, circuit_file, &args).await;
+            run_command::<SimdM31Ext3>(field_type, command, circuit_file, &args).await;
         }
         FieldType::BN254 => {
-            run_command::<Fr>(field_type, command, circuit_file, &args).await;
+            run_command::<Bn254DummyExt3>(field_type, command, circuit_file, &args).await;
         }
         _ => unreachable!(),
     }

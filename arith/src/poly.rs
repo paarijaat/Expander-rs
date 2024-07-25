@@ -1,6 +1,6 @@
 use ark_std::{end_timer, start_timer};
 
-use crate::{FiatShamirConfig, Field};
+use crate::{Field, SimdField};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 /// Definition for an MLE, with an associated type F.
@@ -11,8 +11,8 @@ pub struct MultiLinearPoly<F: Field> {
     pub evals: Vec<F>,
 }
 
-impl<F: Field + FiatShamirConfig> MultiLinearPoly<F> {
-    pub fn eval_multilinear(evals: &[F], x: &[F::ChallengeField]) -> F {
+impl<F: Field + SimdField> MultiLinearPoly<F> {
+    pub fn eval_multilinear(evals: &[F], x: &[F::Scalar]) -> F {
         let timer = start_timer!(|| format!("eval mle with {} vars", x.len()));
         assert_eq!(1 << x.len(), evals.len());
         let mut scratch = evals.to_vec();
@@ -28,7 +28,7 @@ impl<F: Field + FiatShamirConfig> MultiLinearPoly<F> {
         scratch[0]
     }
 
-    pub fn fix_variables(&self, partial_point: &[F::ChallengeField]) -> Self {
+    pub fn fix_variables(&self, partial_point: &[F::Scalar]) -> Self {
         assert!(
             partial_point.len() <= self.var_num,
             "invalid size of partial point"
