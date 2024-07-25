@@ -37,16 +37,16 @@ impl<F: Field + SimdField> GkrScratchpad<F> {
 
 #[derive(Clone, Debug, Default)]
 pub struct SumcheckMultilinearProdScratchpad<F: Field + SimdField> {
-    pub(crate) num_vars: usize,
-    pub(crate) poly1: MultiLinearPoly<F>,
-    pub(crate) poly2: MultiLinearPoly<F>,
-    pub(crate) init_v: Vec<F>,
-    pub(crate) gate_exists: Vec<bool>,
-    pub(crate) helper: SumcheckMultilinearProdHelper,
+    pub num_vars: usize,
+    pub poly1: MultiLinearPoly<F>,
+    pub poly2: MultiLinearPoly<F>,
+    pub init_v: Vec<F>,
+    pub gate_exists: Vec<bool>,
+    pub helper: SumcheckMultilinearProdHelper,
 }
 
 impl<F: Field + SimdField> SumcheckMultilinearProdScratchpad<F> {
-    pub(crate) fn new(poly1: &MultiLinearPoly<F>, poly2: &MultiLinearPoly<F>) -> Self {
+    pub fn new(poly1: &MultiLinearPoly<F>, poly2: &MultiLinearPoly<F>) -> Self {
         let num_vars = poly1.var_num;
         let num_evals = 1 << num_vars;
         assert_eq!(num_evals, poly1.evals.len());
