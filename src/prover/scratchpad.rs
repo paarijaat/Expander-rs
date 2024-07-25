@@ -35,8 +35,8 @@ impl<F: Field + SimdField> GkrScratchpad<F> {
 }
 
 
-#[derive(Clone, Debug)]
-pub struct SumcheckMultilinearProdScratchpad<F: Field> {
+#[derive(Clone, Debug, Default)]
+pub struct SumcheckMultilinearProdScratchpad<F: Field + SimdField> {
     pub(crate) num_vars: usize,
     pub(crate) poly1: MultiLinearPoly<F>,
     pub(crate) poly2: MultiLinearPoly<F>,
@@ -45,7 +45,7 @@ pub struct SumcheckMultilinearProdScratchpad<F: Field> {
     pub(crate) helper: SumcheckMultilinearProdHelper,
 }
 
-impl<F: Field> SumcheckMultilinearProdScratchpad<F> {
+impl<F: Field + SimdField> SumcheckMultilinearProdScratchpad<F> {
     pub(crate) fn new(poly1: &MultiLinearPoly<F>, poly2: &MultiLinearPoly<F>) -> Self {
         let num_vars = poly1.var_num;
         let num_evals = 1 << num_vars;

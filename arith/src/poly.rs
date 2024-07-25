@@ -4,7 +4,7 @@ use crate::{Field, SimdField};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 /// Definition for an MLE, with an associated type F.
-pub struct MultiLinearPoly<F: Field> {
+pub struct MultiLinearPoly<F: Field + SimdField> {
     /// Number of variables in an MLE
     pub var_num: usize,
     /// MLE Evaluations

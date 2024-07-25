@@ -51,7 +51,7 @@ pub(crate) fn eq_eval_at<F: Field>(
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SumcheckMultilinearProdHelper {
     var_num: usize,
     sumcheck_var_idx: usize,

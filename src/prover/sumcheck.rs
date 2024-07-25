@@ -156,8 +156,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arith::{MultiLinearPoly, Bn254DummyExt3};
-    type F = Bn254DummyExt3;
+    use arith::{MultiLinearPoly, Bn254DummyExt3, SimdM31Ext3};
+    //type F = Bn254DummyExt3;
+    type F = SimdM31Ext3;
 
     #[test]
     fn sumcheck_multilinear_prod_test() {
