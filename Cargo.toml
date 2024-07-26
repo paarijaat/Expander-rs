@@ -27,6 +27,11 @@ path = "src/exec.rs"
 name = "matmul"
 path = "src/matmul.rs"
 
+[features]
+default = []
+# default = [ "grinding" ]
+grinding = []
+
 [workspace]
 members = [
     "arith",

@@ -19,9 +19,16 @@ impl FieldSerde for SimdM31Ext3 {
         self.v[2].serialize_into(&mut writer);
     }
 
+    #[cfg(target_arch = "x86_64")]
     #[inline(always)]
     fn serialized_size() -> usize {
-        96
+        512 / 8 * 3
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[inline(always)]
+    fn serialized_size() -> usize {
+        256 / 8 * 3
     }
 
     // FIXME: this deserialization function auto corrects invalid inputs.
@@ -67,7 +74,9 @@ impl From<SimdM31> for SimdM31Ext3 {
     }
 }
 
-impl BinomialExtensionField<3> for SimdM31Ext3 {
+impl BinomialExtensionField for SimdM31Ext3 {
+    const DEGREE: usize = 3;
+
     const W: u32 = 5;
 
     type BaseField = SimdM31;
@@ -85,31 +94,10 @@ impl BinomialExtensionField<3> for SimdM31Ext3 {
             v: [self.v[0] + base, self.v[1], self.v[2]],
         }
     }
-}
-
-impl Mul<M31Ext3> for SimdM31Ext3 {
-    type Output = Self;
 
     #[inline(always)]
-    fn mul(self, rhs: M31Ext3) -> Self::Output {
-        // polynomial mod (x^3 - 5)
-        //
-        //   (a0 + a1*x + a2*x^2) * (b0 + b1*x + b2*x^2) mod (x^3 - 5)
-        // = a0*b0 + (a0*b1 + a1*b0)*x + (a0*b2 + a1*b1 + a2*b0)*x^2
-        // + (a1*b2 + a2*b1)*x^3 + a2*b2*x^4 mod (x^3 - 5)
-        // = a0*b0 + 5*(a1*b2 + a2*b1)
-        // + (a0*b1 + a1*b0)*x + 5* a2*b2
-        // + (a0*b2 + a1*b1 + a2*b0)*x^2
-
-        let five = M31::from(5);
-        let mut res = [SimdM31::default(); 3];
-        res[0] =
-            self.v[0] * rhs.v[0] + self.v[1] * (rhs.v[2] * five) + self.v[2] * (rhs.v[1] * five);
-        // marginally faster than the following:
-        // res[0] = self.v[0] * rhs.v[0] + (self.v[1] * rhs.v[2] + self.v[2] * rhs.v[1]) * five;
-        res[1] = self.v[0] * rhs.v[1] + self.v[1] * rhs.v[0] + self.v[2] * (rhs.v[2] * five);
-        res[2] = self.v[0] * rhs.v[2] + self.v[1] * rhs.v[1] + self.v[2] * rhs.v[0];
-        Self { v: res }
+    fn first_base_field(&self) -> Self::BaseField {
+        self.v[0]
     }
 }
 
@@ -127,9 +115,15 @@ impl From<M31Ext3> for SimdM31Ext3 {
 }
 
 impl Field for SimdM31Ext3 {
+    #[cfg(target_arch = "x86_64")]
     const NAME: &'static str = "AVX Vectorized Mersenne 31 Extension 3";
+    #[cfg(target_arch = "x86_64")]
+    const SIZE: usize = 512 / 8 * 3;
 
-    const SIZE: usize = 96;
+    #[cfg(target_arch = "aarch64")]
+    const NAME: &'static str = "Neon Vectorized Mersenne 31 Extension 3";
+    #[cfg(target_arch = "aarch64")]
+    const SIZE: usize = 256 / 8 * 3;
 
     const ZERO: Self = Self {
         v: [SimdM31::ZERO; 3],
@@ -144,6 +138,11 @@ impl Field for SimdM31Ext3 {
         SimdM31Ext3 {
             v: [SimdM31::zero(); 3],
         }
+    }
+
+    #[inline(always)]
+    fn is_zero(&self) -> bool {
+        self.v[0].is_zero() && self.v[1].is_zero() && self.v[2].is_zero()
     }
 
     #[inline(always)]
@@ -233,6 +232,51 @@ impl MulAssign for SimdM31Ext3 {
     #[inline(always)]
     fn mul_assign(&mut self, rhs: Self) {
         *self *= &rhs;
+    }
+}
+
+impl Mul<M31Ext3> for SimdM31Ext3 {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, rhs: M31Ext3) -> Self::Output {
+        // polynomial mod (x^3 - 5)
+        //
+        //   (a0 + a1*x + a2*x^2) * (b0 + b1*x + b2*x^2) mod (x^3 - 5)
+        // = a0*b0 + (a0*b1 + a1*b0)*x + (a0*b2 + a1*b1 + a2*b0)*x^2
+        // + (a1*b2 + a2*b1)*x^3 + a2*b2*x^4 mod (x^3 - 5)
+        // = a0*b0 + 5*(a1*b2 + a2*b1)
+        // + (a0*b1 + a1*b0)*x + 5* a2*b2
+        // + (a0*b2 + a1*b1 + a2*b0)*x^2
+
+        let five = M31::from(5);
+        let mut res = [SimdM31::default(); 3];
+        res[0] =
+            self.v[0] * rhs.v[0] + self.v[1] * (rhs.v[2] * five) + self.v[2] * (rhs.v[1] * five);
+        res[1] = self.v[0] * rhs.v[1] + self.v[1] * rhs.v[0] + self.v[2] * (rhs.v[2] * five);
+        res[2] = self.v[0] * rhs.v[2] + self.v[1] * rhs.v[1] + self.v[2] * rhs.v[0];
+        Self { v: res }
+    }
+}
+
+impl Mul<M31> for SimdM31Ext3 {
+    type Output = SimdM31Ext3;
+    #[inline(always)]
+    fn mul(self, rhs: M31) -> Self::Output {
+        SimdM31Ext3 {
+            // SimdM31 * M31
+            v: [self.v[0] * rhs, self.v[1] * rhs, self.v[2] * rhs],
+        }
+    }
+}
+
+impl Add<M31> for SimdM31Ext3 {
+    type Output = SimdM31Ext3;
+    #[inline(always)]
+    fn add(self, rhs: M31) -> Self::Output {
+        SimdM31Ext3 {
+            // SimdM31 + M31
+            v: [self.v[0] + rhs, self.v[1], self.v[2]],
+        }
     }
 }
 

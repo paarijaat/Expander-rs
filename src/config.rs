@@ -1,5 +1,9 @@
-#[derive(Debug, Clone, PartialEq)]
+use arith::{BinomialExtensionField, Field, FieldSerde, M31Ext3, SimdField, SimdM31Ext3, M31};
+use halo2curves::bn256::Fr;
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum PolynomialCommitmentType {
+    #[default]
     Raw,
     KZG,
     Orion,
@@ -23,8 +27,16 @@ pub const SENTINEL_BN254: [u8; 32] = [
     69, 80, 184, 41, 160, 49, 225, 114, 78, 100, 48,
 ];
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum GKRScheme {
+    #[default]
+    Vanilla,
+    GkrSquare,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum FiatShamirHashType {
+    #[default]
     SHA256,
     Keccak256,
     Poseidon,
@@ -32,104 +44,143 @@ pub enum FiatShamirHashType {
     MIMC7,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Config {
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Config<C: GKRConfig> {
+    // Field size for the variables
     pub field_size: usize,
+    // Targeted security level for the scheme
     pub security_bits: usize,
+    #[cfg(feature = "grinding")]
+    // Grinding bits to achieve the target security level
     pub grinding_bits: usize,
+    // Polynomial commitment scheme
     pub polynomial_commitment_type: PolynomialCommitmentType,
-    pub field_type: FieldType, // LATER: consider infer this from trait
+    // Enum type for the field
     pub fs_hash: FiatShamirHashType,
-    pub gkr_square: bool,
+    // Field configuration for GKR
+    pub gkr_config: C,
+    // Whether to use GKR^2
+    pub gkr_scheme: GKRScheme,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self::m31_config()
+impl Config<M31ExtConfig> {
+    pub fn new(gkr_scheme: GKRScheme) -> Self {
+        Config {
+            field_size: 93,
+            security_bits: 100,
+            #[cfg(feature = "grinding")]
+            grinding_bits: 10,
+            polynomial_commitment_type: PolynomialCommitmentType::Raw,
+            fs_hash: FiatShamirHashType::SHA256,
+            gkr_config: M31ExtConfig,
+            gkr_scheme,
+        }
     }
 }
 
-impl Config {
-    pub fn m31_config() -> Self {
-        println!("===================================================");
-        println!("WARNING: Using M31 for testing purposes only.");
-        println!("WARNING: Do not use in production.");
-        println!("WARNING: M31 may not give you enough soundness.");
-        println!("WARNING: consider to use M31Ext3 or Bn254::Fr instead.");
-        println!("===================================================");
-
-        let security_bits = 100;
-        let grinding_bits = 10;
-
-        let field_size = 31;
-
-        let polynomial_commitment_type = PolynomialCommitmentType::Raw;
-        let field_type = FieldType::M31;
-        let fs_hash = FiatShamirHashType::SHA256;
-
-        if polynomial_commitment_type == PolynomialCommitmentType::KZG {
-            assert_eq!(field_type, FieldType::BN254);
-        }
-
+impl Config<BN254Config> {
+    pub fn new(gkr_scheme: GKRScheme) -> Self {
         Config {
-            field_size, // update later
-            security_bits,
-            grinding_bits,
-            polynomial_commitment_type,
-            field_type,
-            fs_hash,
-            gkr_square: false,
+            field_size: 93,
+            security_bits: 100,
+            #[cfg(feature = "grinding")]
+            grinding_bits: 10,
+            polynomial_commitment_type: PolynomialCommitmentType::Raw,
+            fs_hash: FiatShamirHashType::SHA256,
+            gkr_config: BN254Config,
+            gkr_scheme,
         }
     }
+}
 
-    // using degree 3 extension of m31
-    pub fn m31_ext3_config() -> Self {
-        let security_bits = 100;
-        let grinding_bits = 10;
+pub trait GKRConfig: Default + Clone + Send + Sync + 'static {
+    /// Field type for the circuit, e.g., M31
+    type CircuitField: Field + FieldSerde + Send;
 
-        let field_size = 93;
+    /// Field type for the challenge, e.g., M31Ext3
+    type ChallengeField: BinomialExtensionField<BaseField = Self::CircuitField> + Send;
 
-        let polynomial_commitment_type = PolynomialCommitmentType::Raw;
-        let field_type = FieldType::M31;
-        let fs_hash = FiatShamirHashType::SHA256;
+    /// Main field type for the scheme, e.g., SimdM31Ext3
+    type Field: BinomialExtensionField + SimdField<Scalar = Self::ChallengeField> + Send;
 
-        if polynomial_commitment_type == PolynomialCommitmentType::KZG {
-            assert_eq!(field_type, FieldType::BN254);
-        }
+    /// Enum type for Self::Field
+    const FIELD_TYPE: FieldType;
 
-        Config {
-            field_size, // update later
-            security_bits,
-            grinding_bits,
-            polynomial_commitment_type,
-            field_type,
-            fs_hash,
-            gkr_square: false,
-        }
+    /// API to allow for multiplications between the challenge and the circuit field
+    fn challenge_mul_circuit_field(
+        a: &Self::ChallengeField,
+        b: &Self::CircuitField,
+    ) -> Self::ChallengeField;
+
+    /// API to allow for multiplications between the main field and the circuit field
+    fn field_mul_circuit_field(a: &Self::Field, b: &Self::CircuitField) -> Self::Field;
+
+    /// API to allow for addition between the main field and the circuit field
+    fn field_add_circuit_field(a: &Self::Field, b: &Self::CircuitField) -> Self::Field;
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct M31ExtConfig;
+
+impl GKRConfig for M31ExtConfig {
+    type CircuitField = M31;
+
+    type ChallengeField = M31Ext3;
+
+    type Field = SimdM31Ext3;
+
+    const FIELD_TYPE: FieldType = FieldType::M31;
+
+    #[inline(always)]
+    fn challenge_mul_circuit_field(
+        a: &Self::ChallengeField,
+        b: &Self::CircuitField,
+    ) -> Self::ChallengeField {
+        a.mul_by_base_field(b)
     }
 
-    pub fn bn254_config() -> Self {
-        let security_bits = 128;
-        let grinding_bits = 0;
+    #[inline(always)]
+    fn field_mul_circuit_field(a: &Self::Field, b: &Self::CircuitField) -> Self::Field {
+        // directly multiply M31Ext3 with M31
+        // skipping the conversion M31 -> M31Ext3
+        *a * *b
+    }
 
-        let field_size = 254;
+    #[inline(always)]
+    fn field_add_circuit_field(a: &Self::Field, b: &Self::CircuitField) -> Self::Field {
+        // directly add M31Ext3 with M31
+        // skipping the conversion M31 -> M31Ext3
+        *a + *b
+    }
+}
 
-        let polynomial_commitment_type = PolynomialCommitmentType::Raw;
-        let field_type = FieldType::BN254;
-        let fs_hash = FiatShamirHashType::SHA256;
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BN254Config;
 
-        if polynomial_commitment_type == PolynomialCommitmentType::KZG {
-            assert_eq!(field_type, FieldType::BN254);
-        }
+impl GKRConfig for BN254Config {
+    type CircuitField = Fr;
 
-        Config {
-            field_size, // update later
-            security_bits,
-            grinding_bits,
-            polynomial_commitment_type,
-            field_type,
-            fs_hash,
-            gkr_square: false,
-        }
+    type ChallengeField = Fr;
+
+    type Field = Fr;
+
+    const FIELD_TYPE: FieldType = FieldType::BN254;
+
+    #[inline(always)]
+    fn challenge_mul_circuit_field(
+        a: &Self::ChallengeField,
+        b: &Self::CircuitField,
+    ) -> Self::ChallengeField {
+        a * b
+    }
+
+    #[inline(always)]
+    fn field_mul_circuit_field(a: &Self::Field, b: &Self::CircuitField) -> Self::Field {
+        a * b
+    }
+
+    #[inline(always)]
+    fn field_add_circuit_field(a: &Self::Field, b: &Self::CircuitField) -> Self::Field {
+        *a + *b
     }
 }

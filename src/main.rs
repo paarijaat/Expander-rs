@@ -4,16 +4,14 @@ use std::{
     thread,
 };
 
-use arith::{BinomialExtensionField, Bn254DummyExt3, SimdM31Ext3};
-use arith::{FieldSerde, SimdField};
 use clap::Parser;
-use expander_rs::{Circuit, Config, Prover};
+use expander_rs::{BN254Config, Circuit, Config, GKRConfig, GKRScheme, M31ExtConfig, Prover};
 
+// circuit for repeating Keccak for 8 times
 const KECCAK_CIRCUIT: &str = "data/circuit.txt";
 // circuit for repeating Poseidon for 120 times
 const POSEIDON_CIRCUIT: &str = "data/poseidon_120_circuit.txt";
 
-const M31_PACKSIZE: usize = 8;
 const FR_PACKSIZE: usize = 1;
 
 /// ...
@@ -42,36 +40,53 @@ fn main() {
     print_info(&args);
 
     match args.field.as_str() {
-        "m31ext3" => run_benchmark::<SimdM31Ext3>(&args, Config::m31_ext3_config()),
-        "fr" => run_benchmark::<Bn254DummyExt3>(&args, Config::bn254_config()),
+        "m31ext3" => match args.scheme.as_str() {
+            "keccak" => run_benchmark::<M31ExtConfig>(
+                &args,
+                Config::<M31ExtConfig>::new(GKRScheme::Vanilla),
+            ),
+            "poseidon" => run_benchmark::<M31ExtConfig>(
+                &args,
+                Config::<M31ExtConfig>::new(GKRScheme::GkrSquare),
+            ),
+            _ => unreachable!(),
+        },
+        "fr" => match args.scheme.as_str() {
+            "keccak" => {
+                run_benchmark::<BN254Config>(&args, Config::<BN254Config>::new(GKRScheme::Vanilla))
+            }
+            "poseidon" => run_benchmark::<BN254Config>(
+                &args,
+                Config::<BN254Config>::new(GKRScheme::GkrSquare),
+            ),
+            _ => unreachable!(),
+        },
         _ => unreachable!(),
     };
 }
 
-fn run_benchmark<F>(args: &Args, config: Config)
-where
-    F: BinomialExtensionField<3> + FieldSerde + SimdField + Send + 'static,
-{
-    println!("benchmarking keccak over {}", args.field);
-
+fn run_benchmark<C: GKRConfig>(args: &Args, config: Config<C>) {
     let partial_proof_cnts = (0..args.threads)
         .map(|_| Arc::new(Mutex::new(0)))
         .collect::<Vec<_>>();
     let start_time = std::time::Instant::now();
-
+    #[cfg(target_arch = "x86_64")]
+    let m31_packsize: usize = 16;
+    #[cfg(target_arch = "aarch64")]
+    let m31_packsize: usize = 8;
     let pack_size = match args.field.as_str() {
-        "m31ext3" => M31_PACKSIZE,
+        "m31ext3" => m31_packsize,
         "fr" => FR_PACKSIZE,
         _ => unreachable!(),
     };
 
     // load circuit
     let circuit_template = match args.scheme.as_str() {
-        "keccak" => Circuit::<F>::load_circuit(KECCAK_CIRCUIT),
-        "poseidon" => Circuit::<F>::load_circuit(POSEIDON_CIRCUIT),
+        "keccak" => Circuit::<C>::load_circuit(KECCAK_CIRCUIT),
+        "poseidon" => Circuit::<C>::load_circuit(POSEIDON_CIRCUIT),
         _ => unreachable!(),
     };
-    
+
     let circuit_copy_size: usize = match args.scheme.as_str() {
         "keccak" => 8,
         "poseidon" => 120,
@@ -93,12 +108,7 @@ where
         .enumerate()
         .map(|(i, c)| {
             let partial_proof_cnt = partial_proof_cnts[i].clone();
-            let mut local_config = config.clone();
-            local_config.gkr_square = match args.scheme.as_str() {
-                "keccak" => false,
-                "poseidon" => true,
-                _ => unreachable!(),
-            };
+            let local_config = config.clone();
             thread::spawn(move || {
                 loop {
                     // bench func
@@ -107,7 +117,6 @@ where
                     prover.prove(&c);
                     // update cnt
                     let mut cnt = partial_proof_cnt.lock().unwrap();
-
                     let proof_cnt_this_round = circuit_copy_size * pack_size;
                     *cnt += proof_cnt_this_round;
                 }
@@ -130,8 +139,14 @@ where
 }
 
 fn print_info(args: &Args) {
+    println!("===============================");
+    println!(
+        "benchmarking {} with GKR^2 over {}",
+        args.scheme, args.field
+    );
     println!("field:          {}", args.field);
     println!("#threads:       {}", args.threads);
     println!("#bench repeats: {}", args.repeats);
-    println!("scheme:         {}", args.scheme);
+    println!("hash scheme:    {}", args.scheme);
+    println!("===============================")
 }

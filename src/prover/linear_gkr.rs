@@ -1,21 +1,24 @@
 //! This module implements the whole GKR prover, including the IOP and PCS.
 
-use arith::{BinomialExtensionField, Field, FieldSerde, SimdField};
 use ark_std::{end_timer, start_timer};
 
 use crate::{
-    gkr_prove, gkr_square_prove, Circuit, Config, GkrScratchpad, Proof, RawCommitment, Transcript,
+    gkr_prove, gkr_square_prove, Circuit, Config, GKRConfig, GKRScheme, GkrScratchpad, Proof,
+    RawCommitment, Transcript,
 };
 
-pub fn grind<F: Field + FieldSerde + SimdField>(transcript: &mut Transcript, config: &Config) {
+#[cfg(feature = "grinding")]
+pub(crate) fn grind<C: GKRConfig>(transcript: &mut Transcript, config: &Config<C>) {
+    use arith::{Field, FieldSerde};
+
     let timer = start_timer!(|| format!("grind {} bits", config.grinding_bits));
 
     let mut hash_bytes = vec![];
 
     // ceil(32/field_size)
-    let num_field_elements = (31 + F::Scalar::SIZE) / F::Scalar::SIZE;
+    let num_field_elements = (31 + C::ChallengeField::SIZE) / C::ChallengeField::SIZE;
 
-    let initial_hash = transcript.challenge_fs::<F>(num_field_elements);
+    let initial_hash = transcript.challenge_fs::<C>(num_field_elements);
     initial_hash
         .iter()
         .for_each(|h| h.serialize_into(&mut hash_bytes));
@@ -30,13 +33,22 @@ pub fn grind<F: Field + FieldSerde + SimdField>(transcript: &mut Transcript, con
     end_timer!(timer);
 }
 
-pub struct Prover<F: BinomialExtensionField<3> + FieldSerde + SimdField> {
-    config: Config,
-    sp: GkrScratchpad<F>,
+pub struct Prover<C: GKRConfig> {
+    config: Config<C>,
+    sp: GkrScratchpad<C>,
 }
 
-impl<F: BinomialExtensionField<3> + FieldSerde + SimdField> Prover<F> {
-    pub fn new(config: &Config) -> Self {
+impl<C: GKRConfig> Default for Prover<C> {
+    fn default() -> Self {
+        Self {
+            config: Config::<C>::default(),
+            sp: GkrScratchpad::default(),
+        }
+    }
+}
+
+impl<C: GKRConfig> Prover<C> {
+    pub fn new(config: &Config<C>) -> Self {
         // assert_eq!(config.field_type, crate::config::FieldType::M31);
         assert_eq!(config.fs_hash, crate::config::FiatShamirHashType::SHA256);
         assert_eq!(
@@ -45,11 +57,10 @@ impl<F: BinomialExtensionField<3> + FieldSerde + SimdField> Prover<F> {
         );
         Prover {
             config: config.clone(),
-            sp: GkrScratchpad::<F>::default(),
+            sp: GkrScratchpad::default(),
         }
     }
-
-    pub fn prepare_mem(&mut self, c: &Circuit<F>) {
+    pub fn prepare_mem(&mut self, c: &Circuit<C>) {
         let max_num_input_var = c
             .layers
             .iter()
@@ -62,29 +73,32 @@ impl<F: BinomialExtensionField<3> + FieldSerde + SimdField> Prover<F> {
             .map(|layer| layer.output_var_num)
             .max()
             .unwrap();
-        self.sp = GkrScratchpad::<F>::new(max_num_input_var, max_num_output_var);
+        self.sp = GkrScratchpad::<C>::new(max_num_input_var, max_num_output_var);
     }
 
-    pub fn prove(&mut self, c: &Circuit<F>) -> (F, Proof) {
+    pub fn prove(&mut self, c: &Circuit<C>) -> (C::Field, Proof) {
         let timer = start_timer!(|| "prove");
         // std::thread::sleep(std::time::Duration::from_secs(1)); // TODO
 
         // PC commit
-        let commitment = RawCommitment::new(c.layers[0].input_vals.evals.clone());
+        let commitment = RawCommitment::<C>::new(c.layers[0].input_vals.evals.clone());
 
         let mut buffer = vec![];
         commitment.serialize_into(&mut buffer);
         let mut transcript = Transcript::new();
         transcript.append_u8_slice(&buffer);
 
-        let claimed_v: F;
+        #[cfg(feature = "grinding")]
+        grind::<C>(&mut transcript, &self.config);
+
+        let claimed_v: C::Field;
         let mut _rz0s = vec![];
         let mut _rz1s = vec![];
 
-        if self.config.gkr_square {
-            (claimed_v, _rz0s) = gkr_square_prove(c, &mut self.sp, &mut transcript, &self.config);
+        if self.config.gkr_scheme == GKRScheme::GkrSquare {
+            (claimed_v, _rz0s) = gkr_square_prove(c, &mut self.sp, &mut transcript);
         } else {
-            (claimed_v, _rz0s, _rz1s) = gkr_prove(c, &mut self.sp, &mut transcript, &self.config);
+            (claimed_v, _rz0s, _rz1s) = gkr_prove(c, &mut self.sp, &mut transcript);
         }
 
         // open
@@ -94,7 +108,6 @@ impl<F: BinomialExtensionField<3> + FieldSerde + SimdField> Prover<F> {
             }
             _ => todo!(),
         }
-
         end_timer!(timer);
         (claimed_v, transcript.proof)
     }

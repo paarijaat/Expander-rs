@@ -1,7 +1,7 @@
 use std::fs;
 
 use arith::{Field, SimdM31Ext3};
-use expander_rs::{Circuit, Config, Prover, Verifier};
+use expander_rs::{Circuit, Config, GKRScheme, M31ExtConfig, Prover, Verifier};
 use rand::Rng;
 
 const FILENAME_CIRCUIT: &str = "data/circuit.txt";
@@ -12,14 +12,15 @@ type F = SimdM31Ext3;
 
 #[test]
 fn test_compiler_format_integration() {
-    let config = Config::m31_config();
-    println!("Config created.");
-    let mut circuit = Circuit::<F>::load_circuit(FILENAME_CIRCUIT);
+    let config = Config::<M31ExtConfig>::new(GKRScheme::Vanilla);
+
+    let mut circuit = Circuit::<M31ExtConfig>::load_circuit(FILENAME_CIRCUIT);
     println!("Circuit loaded.");
     circuit.load_witness_file(FILENAME_WITNESS);
     println!("Witness loaded.");
     circuit.evaluate();
     println!("Circuit evaluated.");
+
     // check last layer first output
     let last_layer = circuit.layers.last().unwrap();
     let last_layer_first_output = last_layer.output_vals.evals[0];
@@ -40,7 +41,7 @@ fn test_compiler_format_integration() {
     let rng = &mut rand::thread_rng();
     let random_idx = rng.gen_range(0..bad_proof.bytes.len());
     let random_change = rng.gen_range(1..256) as u8;
-    bad_proof.bytes[random_idx] += random_change;
+    bad_proof.bytes[random_idx] ^= random_change;
     assert!(!verifier.verify(&circuit, &claimed_v, &bad_proof));
     println!("Bad proof rejected.");
 }
@@ -48,7 +49,7 @@ fn test_compiler_format_integration() {
 #[test]
 fn test_compiler_format_integration_no_prove() {
     println!("Config created.");
-    let mut circuit = Circuit::<F>::load_circuit(FILENAME_CIRCUIT);
+    let mut circuit = Circuit::<M31ExtConfig>::load_circuit(FILENAME_CIRCUIT);
     println!("Circuit loaded.");
     circuit.load_witness_file(FILENAME_WITNESS);
     println!("Witness loaded.");
