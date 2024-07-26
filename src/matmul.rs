@@ -3,10 +3,10 @@ use std::vec;
 use log::info;
 // use ark_std::{start_timer, end_timer};
 
-use arith::{Field, FieldSerde, MultiLinearPoly};
-use expander_rs::{Transcript, sumcheck_multilinear_prod, SumcheckMultilinearProdScratchpad,
-    BN254Config, Circuit, Config, FieldType, GKRConfig, GKRScheme, M31ExtConfig, Proof, Prover,
-    Verifier, SENTINEL_BN254, SENTINEL_M31,
+use arith::MultiLinearPoly;
+use expander_rs::{
+    Transcript, sumcheck_multilinear_prod, SumcheckMultilinearProdScratchpad,
+    BN254Config, M31ExtConfig, GKRConfig
 };
 
 #[macro_export]
@@ -159,4 +159,6 @@ fn main() {
     simple_tests::<BN254Config>();
     sumcheck_multilinear_prod_test::<BN254Config>();
 
+    // simple_tests::<M31ExtConfig>();
+    // sumcheck_multilinear_prod_test::<M31ExtConfig>();
 }
