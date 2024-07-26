@@ -244,4 +244,23 @@ impl Verifier {
 
         verified
     }
+
+    pub fn verify_sumcheck<F: Field + FieldSerde + SimdField>(
+        &self,
+        claimed_v: &F,
+        proof: &Proof,
+    ) -> bool {
+        let mut cursor = Cursor::new(&proof.bytes);
+        let mut transcript = Transcript::new();
+        //proof.step(256 / 8);
+
+        // let (mut verified, rz0, rz1, claimed_v0, claimed_v1) = sumcheck_verify(
+        //     claimed_v,
+        //     &mut transcript,
+        //     &mut proof,
+        //     &self.config,
+        // );
+
+        false
+    }
 }
