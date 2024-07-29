@@ -1,12 +1,11 @@
-use std::vec;
-
+use std::{vec,iter::zip};
 use log::info;
 // use ark_std::{start_timer, end_timer};
 
 use arith::MultiLinearPoly;
 use expander_rs::{
     Transcript, sumcheck_multilinear_prod, SumcheckMultilinearProdScratchpad,
-    BN254Config, M31ExtConfig, GKRConfig
+    GKRConfig, BN254Config, Verifier,
 };
 
 #[macro_export]
@@ -17,6 +16,7 @@ macro_rules! log2i {
 }
 
 fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
+    info!("========== Sumcheck =========");
     let num_vars: usize = 2;
     //let config = Config::bn254_config();
 
@@ -47,7 +47,7 @@ fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
     let mut sp = SumcheckMultilinearProdScratchpad::<C>::new(&poly1, &poly2);
     let mut tp = Transcript::new();
 
-    let (randomness_sumcheck, (p1,p2)) = sumcheck_multilinear_prod(
+    let (randomness_sumcheck, claimed_evals) = sumcheck_multilinear_prod(
         &mut tp, 
         &mut sp,
     );
@@ -62,10 +62,18 @@ fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
         &randomness_sumcheck
     );
 
-    info!("{:?}, {:?}", v1, v2);
-    info!("{:?}, {:?}", p1, p2);
-    assert_eq!(p1, v1);
-    assert_eq!(p2, v2);
+    let sum: C::Field = zip(&evals1, &evals2).map(|(a,b)| *a * *b).sum();
+    info!("Sum:  {:?}", sum);
+    info!("Randomness:  {:?}", randomness_sumcheck);
+    info!("Computed ev: {:?}, {:?}", v1, v2);
+    info!("Claimed ev:  {:?}, {:?}", claimed_evals[0], claimed_evals[1]);
+    assert_eq!(claimed_evals[0], v1);
+    assert_eq!(claimed_evals[1], v2);
+
+    let mut verified = false;
+    let verifier = Verifier::<C>::default();
+    verifier.verify_sumcheck(num_vars, &sum, &claimed_evals, &mut tp.proof, &mut verified);
+
 }
 
 fn simple_tests<C: GKRConfig>() {

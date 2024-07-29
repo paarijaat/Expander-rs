@@ -97,11 +97,10 @@ pub fn sumcheck_prove_gkr_square_layer<C: GKRConfig>(
 pub fn sumcheck_multilinear_prod<C: GKRConfig>(
     transcript: &mut Transcript,
     sp: &mut SumcheckMultilinearProdScratchpad<C>,
-) -> (Vec<C::ChallengeField>, (C::Field,C::Field))
+) -> (Vec<C::ChallengeField>, Vec<C::Field>)
 {
     let mut randomness_sumcheck = Vec::<C::ChallengeField>::new();
-    let mut claimed_evals_m1_m2 = (C::Field::default(), C::Field::default());
-
+    let mut claimed_evals = Vec::<C::Field>::new();
     for i_var in 0..sp.num_vars {
         // Computes the three values (evaluations of the poly for the verifier)
         let evals = sp.helper.poly_eval_at(
@@ -133,16 +132,14 @@ pub fn sumcheck_multilinear_prod<C: GKRConfig>(
         );
     }
 
-    // Claimed evaluations of m1 and m2
-    // log::trace!("vx claim: {:?}", helper.vx_claim());
-    claimed_evals_m1_m2.0 = sp.poly1.evals[0].clone();
-    transcript.append_f::<C>(claimed_evals_m1_m2.0);
+    // Claimed evaluations of p1 and p2 at randomness_sumcheck
+    transcript.append_f::<C>(sp.poly1.evals[0].clone());
+    claimed_evals.push(sp.poly1.evals[0].clone());
 
-    // log::trace!("claimed vy[{}] = {:?}", j, helper.vy_claim());
-    claimed_evals_m1_m2.1 = sp.poly2.evals[0].clone();
-    transcript.append_f::<C>(claimed_evals_m1_m2.1);
+    transcript.append_f::<C>(sp.poly2.evals[0].clone());
+    claimed_evals.push(sp.poly2.evals[0].clone());
 
-    (randomness_sumcheck, claimed_evals_m1_m2)
+    (randomness_sumcheck, claimed_evals)
 }
 
 

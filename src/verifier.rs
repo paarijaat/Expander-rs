@@ -263,20 +263,44 @@ impl<C: GKRConfig> Verifier<C> {
 
     pub fn verify_sumcheck(
         &self,
-        claimed_v: &C::Field,
-        proof: &Proof,
-    ) -> bool {
-        let mut cursor = Cursor::new(&proof.bytes);
+        num_vars: usize,
+        claimed_sum: &C::Field,
+        claimed_poly_evals: &[C::Field],
+        proof: &mut Proof,
+        verified: &mut bool,
+    ) {
         let mut transcript = Transcript::new();
-        //proof.step(256 / 8);
+        let mut verif = true;
+        let mut sum = *claimed_sum;
 
+
+        for i in 0..num_vars {
+            let p0 = proof.get_next_and_step();
+            let p1 = proof.get_next_and_step();
+            let p2 = proof.get_next_and_step();
+            transcript.append_f::<C>(p0);
+            transcript.append_f::<C>(p1);
+            transcript.append_f::<C>(p2);
+            
+            log::trace!("i_var={} p0 p1 p2: {:?} {:?} {:?}", i, p0, p1, p2);
+
+            let r = transcript.challenge_f::<C>();
+
+            verif &= sum == p0 + p1;
+
+            sum = degree_2_eval(p0, p1, p2, r);
+        }
+        verif &= sum == claimed_poly_evals[0] * claimed_poly_evals[1];
+
+        transcript.append_f::<C>(claimed_poly_evals[0]);
+        transcript.append_f::<C>(claimed_poly_evals[1]);
+        
+        *verified = verif;
         // let (mut verified, rz0, rz1, claimed_v0, claimed_v1) = sumcheck_verify(
         //     claimed_v,
         //     &mut transcript,
         //     &mut proof,
         //     &self.config,
         // );
-
-        false
     }
 }
