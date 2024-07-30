@@ -274,7 +274,7 @@ impl<C: GKRConfig> Verifier<C> {
         let mut sum = *claimed_sum;
 
 
-        for i in 0..num_vars {
+        for _i in 0..num_vars {
             let p0 = proof.get_next_and_step();
             let p1 = proof.get_next_and_step();
             let p2 = proof.get_next_and_step();
@@ -282,7 +282,7 @@ impl<C: GKRConfig> Verifier<C> {
             transcript.append_f::<C>(p1);
             transcript.append_f::<C>(p2);
             
-            log::trace!("i_var={} p0 p1 p2: {:?} {:?} {:?}", i, p0, p1, p2);
+            //log::trace!("i_var={} p0 p1 p2: {:?} {:?} {:?}", i, p0, p1, p2);
 
             let r = transcript.challenge_f::<C>();
 
@@ -296,11 +296,5 @@ impl<C: GKRConfig> Verifier<C> {
         transcript.append_f::<C>(claimed_poly_evals[1]);
         
         *verified = verif;
-        // let (mut verified, rz0, rz1, claimed_v0, claimed_v1) = sumcheck_verify(
-        //     claimed_v,
-        //     &mut transcript,
-        //     &mut proof,
-        //     &self.config,
-        // );
     }
 }

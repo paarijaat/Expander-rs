@@ -1,6 +1,6 @@
 use std::{vec,iter::zip};
 use log::info;
-// use ark_std::{start_timer, end_timer};
+use ark_std::{start_timer, end_timer};
 
 use arith::MultiLinearPoly;
 use expander_rs::{
@@ -15,29 +15,36 @@ macro_rules! log2i {
     };
 }
 
-fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
-    info!("========== Sumcheck =========");
-    let num_vars: usize = 2;
+fn sumcheck_multilinear_prod_test<C: GKRConfig>(num_vars: usize) {
+    info!("========== Sumcheck {} vars =========", num_vars);
     //let config = Config::bn254_config();
 
-    let evals1 = vec![
-        C::Field::from(4 as u32),  // f(0,0)
-        C::Field::from(9 as u32),  // f(0,1)
-        C::Field::from(16 as u32), // f(1,0)
-        C::Field::from(25 as u32)  // f(1,1)
-    ];
+    let mut evals1 = Vec::<C::Field>::new();
+    for i in 0..(1 << num_vars) as u32 {
+        evals1.push(C::Field::from(i))
+    }
+    // let evals1 = vec![
+    //     C::Field::from(4 as u32),  // f(0,0)
+    //     C::Field::from(9 as u32),  // f(0,1)
+    //     C::Field::from(16 as u32), // f(1,0)
+    //     C::Field::from(25 as u32)  // f(1,1)
+    // ];
 
     let poly1 = MultiLinearPoly::<C::Field> {
         var_num: num_vars,
         evals: evals1.clone()
     };
 
-    let evals2 = vec![
-        C::Field::from(1 as u32),  // f(0,0)
-        C::Field::from(1 as u32),  // f(0,1)
-        C::Field::from(1 as u32), // f(1,0)
-        C::Field::from(1 as u32)  // f(1,1)
-    ];
+    let mut evals2 = Vec::<C::Field>::new();
+    for i in 0..(1 << num_vars) as u32 {
+        evals2.push(C::Field::from(i+1))
+    }
+    // let evals2 = vec![
+    //     C::Field::from(1 as u32),  // f(0,0)
+    //     C::Field::from(1 as u32),  // f(0,1)
+    //     C::Field::from(1 as u32), // f(1,0)
+    //     C::Field::from(1 as u32)  // f(1,1)
+    // ];
 
     let poly2 = MultiLinearPoly::<C::Field> {
         var_num: num_vars,
@@ -47,10 +54,14 @@ fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
     let mut sp = SumcheckMultilinearProdScratchpad::<C>::new(&poly1, &poly2);
     let mut tp = Transcript::new();
 
+    let prove_time = start_timer!(|| format!("Sumcheck {} vars", num_vars));
+
     let (randomness_sumcheck, claimed_evals) = sumcheck_multilinear_prod(
         &mut tp, 
         &mut sp,
     );
+
+    end_timer!(prove_time);
 
     let v1 = MultiLinearPoly::<C::Field>::eval_multilinear(
         &evals1,
@@ -64,7 +75,7 @@ fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
 
     let sum: C::Field = zip(&evals1, &evals2).map(|(a,b)| *a * *b).sum();
     info!("Sum:  {:?}", sum);
-    info!("Randomness:  {:?}", randomness_sumcheck);
+    //info!("Randomness:  {:?}", randomness_sumcheck);
     info!("Computed ev: {:?}, {:?}", v1, v2);
     info!("Claimed ev:  {:?}, {:?}", claimed_evals[0], claimed_evals[1]);
     assert_eq!(claimed_evals[0], v1);
@@ -73,6 +84,8 @@ fn sumcheck_multilinear_prod_test<C: GKRConfig>() {
     let mut verified = false;
     let verifier = Verifier::<C>::default();
     verifier.verify_sumcheck(num_vars, &sum, &claimed_evals, &mut tp.proof, &mut verified);
+    assert_eq!(verified, true);
+    info!("Verified: true");
 
 }
 
@@ -164,8 +177,10 @@ fn simple_tests<C: GKRConfig>() {
 fn main() {
     env_logger::init();
 
+    info!("{}, {}, {}", 1 << 1, 1 << 2, 1 << 3);
+
     simple_tests::<BN254Config>();
-    sumcheck_multilinear_prod_test::<BN254Config>();
+    sumcheck_multilinear_prod_test::<BN254Config>(21);
 
     // simple_tests::<M31ExtConfig>();
     // sumcheck_multilinear_prod_test::<M31ExtConfig>();

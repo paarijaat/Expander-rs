@@ -31,6 +31,7 @@ path = "src/matmul.rs"
 default = []
 # default = [ "grinding" ]
 grinding = []
+print-trace = ["ark-std/print-trace"]
 
 [workspace]
 members = [
