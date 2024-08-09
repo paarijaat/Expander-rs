@@ -47,6 +47,17 @@ fn detect_field_type_from_circuit_file(circuit_file: &str) -> FieldType {
     }
 }
 
+// fn post_process<C: GKRConfig>(c: &mut Circuit<C>) {
+//     let l = &mut c.layers[0];
+//     l.input_vals.evals
+
+//     l.input_var_num
+
+//     for gate in l.mul.iter()
+//     for gate in l.add.iter()
+//     for gate in l.const_.iter()
+// }
+
 async fn run_command<C: GKRConfig>(
     command: &str,
     circuit_file: &str,

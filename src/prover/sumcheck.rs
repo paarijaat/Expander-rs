@@ -103,13 +103,11 @@ pub fn sumcheck_multilinear_prod<C: GKRConfig>(
     let mut claimed_evals = Vec::<C::Field>::new();
     for i_var in 0..sp.num_vars {
         // Computes the three values (evaluations of the poly for the verifier)
-        let evals = sp.helper.poly_eval_at(
+        let evals = sp.helper.sumcheck_poly_eval_at(
             i_var, 
             2, 
             sp.poly1.evals.as_mut_slice(),
             sp.poly2.evals.as_mut_slice(),
-            &sp.init_v, // TODO: fix this, why do we need to send this
-            &sp.gate_exists  // TODO: fix this, why do we need to send this
         );
 
         // Append the poly sent to verifier to the transcript
@@ -122,13 +120,11 @@ pub fn sumcheck_multilinear_prod<C: GKRConfig>(
         randomness_sumcheck.push(r.clone());
 
         // Fix the next variable using the fiat-shamir randomness
-        sp.helper.receive_challenge::<C>(
+        sp.helper.sumcheck_receive_challenge::<C>(
             i_var, 
             r, 
             sp.poly1.evals.as_mut_slice(), 
             sp.poly2.evals.as_mut_slice(),
-            &sp.init_v, // TODO: fix this, why do we need to send this
-            &mut sp.gate_exists  // TODO: fix this, why do we need to send this
         );
     }
 

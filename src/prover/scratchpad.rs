@@ -45,8 +45,6 @@ pub struct SumcheckMultilinearProdScratchpad<C: GKRConfig> {
     pub num_vars: usize,
     pub poly1: MultiLinearPoly<C::Field>,
     pub poly2: MultiLinearPoly<C::Field>,
-    pub init_v: Vec<C::Field>,
-    pub gate_exists: Vec<bool>,
     pub helper: SumcheckMultilinearProdHelper,
 }
 
@@ -60,8 +58,6 @@ impl<C: GKRConfig> SumcheckMultilinearProdScratchpad<C> {
             num_vars,
             poly1: poly1.clone(),
             poly2: poly2.clone(),
-            init_v: poly1.evals.clone(),
-            gate_exists: vec![true; num_evals],
             helper: SumcheckMultilinearProdHelper::new(num_vars),
         }
     }

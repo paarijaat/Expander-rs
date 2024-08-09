@@ -147,6 +147,51 @@ impl SumcheckMultilinearProdHelper {
         self.cur_eval_size >>= 1;
         self.sumcheck_var_idx += 1;
     }
+
+    pub fn sumcheck_poly_eval_at<F: Field>(
+        &self,
+        var_idx: usize,
+        degree: usize,
+        bk_poly1: &mut [F],
+        bk_poly2: &mut [F],
+    ) -> [F; 3] {
+        assert_eq!(degree, 2);
+        let mut p0 = F::zero();
+        let mut p1 = F::zero();
+        let mut p2 = F::zero();
+        let eval_size = 1 << (self.var_num - var_idx - 1);
+        for i in 0..eval_size {
+            let poly1_v_0 = bk_poly1[i * 2];
+            let poly1_v_1 = bk_poly1[i * 2 + 1];
+            let poly2_v_0 = bk_poly2[i * 2];
+            let poly2_v_1 = bk_poly2[i * 2 + 1];
+            p0 += poly1_v_0 * poly2_v_0;
+            p1 += poly1_v_1 * poly2_v_1;
+            p2 += (poly1_v_0 + poly1_v_1) * (poly2_v_0 + poly2_v_1);
+        }
+        p2 = p1.mul_by_6() + p0.mul_by_3() - p2.double();
+        [p0, p1, p2]
+    }
+
+    pub fn sumcheck_receive_challenge<C: GKRConfig>(
+        &mut self,
+        var_idx: usize,
+        r: C::ChallengeField,
+        bk_poly1: &mut [C::Field],
+        bk_poly2: &mut [C::Field],
+    ) {
+        assert_eq!(var_idx, self.sumcheck_var_idx);
+        assert!(var_idx < self.var_num);
+        log::trace!("challenge eval size: {}", self.cur_eval_size);
+        for i in 0..self.cur_eval_size >> 1 {
+            bk_poly1[i] = bk_poly1[2 * i] + (bk_poly1[2 * i + 1] - bk_poly1[2 * i]).scale(&r);
+            bk_poly2[i] = bk_poly2[2 * i] + (bk_poly2[2 * i + 1] - bk_poly2[2 * i]).scale(&r);
+        }
+
+        self.cur_eval_size >>= 1;
+        self.sumcheck_var_idx += 1;
+    }
+
 }
 
 #[allow(dead_code)]
