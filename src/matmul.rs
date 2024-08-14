@@ -6,7 +6,7 @@ use ark_std::{end_timer, start_timer};
 use arith::MultiLinearPoly;
 use expander_rs::{
     Transcript, sumcheck_multilinear_prod, SumcheckMultilinearProdScratchpad,
-    GKRConfig, BN254Config, Verifier,
+    GKRConfig, BN254Config, Verifier, Proof
 };
 use csv;
 use csv::StringRecord;
@@ -36,6 +36,7 @@ macro_rules! rbin {
 
 pub type Matrix<T> = Vec<Vec<T>>;
 
+#[allow(dead_code)]
 fn read_matrix<C: GKRConfig>(filename: &str) -> Matrix<C::Field> {
 
     let mut reader = csv::ReaderBuilder::new()
@@ -139,6 +140,259 @@ fn get_dummy_mat<C: GKRConfig>(num_rows: usize, num_cols: usize) -> Matrix<C::Fi
     return mat
 }
 
+fn compute_dotproduct<C: GKRConfig>(mat1_row: &Vec<C::Field>, mat2: &Matrix<C::Field>, mat2_col_idx: usize) -> C::Field {
+    // let dot: C::Field = zip(&vec1, &vec2).map(|(a,b)| *a * *b).sum();
+    let mut dot = C::Field::zero();
+    for i in 0..mat1_row.len() {
+        dot += mat1_row[i] * mat2[i][mat2_col_idx];
+    }
+    return dot
+}
+
+fn multiply_mats<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>) -> Matrix<C::Field> {
+    let mat1_num_rows: usize = mat1.len();
+    let mat1_num_cols: usize = mat1[0].len();
+
+    let mat2_num_rows: usize = mat2.len();
+    let mat2_num_cols: usize = mat2[0].len();
+
+    assert_eq!(mat1_num_cols, mat2_num_rows);
+
+    let mut prod_mat: Matrix<C::Field> = vec![vec![C::Field::zero(); mat2_num_cols]; mat1_num_rows];
+
+    for i in 0..mat1_num_rows {
+        for j in 0..mat2_num_cols {
+            prod_mat[i][j] = compute_dotproduct::<C>(&mat1[i], mat2, j)
+        }
+    }
+    return prod_mat;
+}
+
+fn prove_matmul<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>)
+    -> (Vec<C::ChallengeField>, Vec<C::Field>, C::Field, Proof) 
+{
+    info!("Prover - Matmult");
+    info!("Matrix to MLE");
+    // Convert Matrices to padded MLE
+    let (mat1_mle, mat1_num_var_rows_padded, mat1_num_var_cols_padded) 
+        = matrix_to_mle::<C>(&mat1, false, false);
+    let (mat2_mle, mat2_num_var_rows_padded, mat2_num_var_cols_padded) 
+        = matrix_to_mle::<C>(&mat2, false, false);
+
+    debug!("mat1_mle({}, {}): {:?}", 1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, mat1_mle.evals);
+    debug!("mat2_mle({}, {}): {:?}", 1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, mat2_mle.evals);
+
+    assert_eq!(mat1_num_var_cols_padded, mat2_num_var_rows_padded);
+
+    info!("Padded Matrices: {}x{}  *  {}x{} = {}x{}", 
+        1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, 
+        1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, 
+        1<<mat1_num_var_rows_padded, 1<<mat2_num_var_cols_padded
+    );
+
+    info!("Sumcheck");
+
+    let num_vars_product = mat1_num_var_rows_padded + mat2_num_var_cols_padded;
+
+    // Generate pre-sumcheck randomness
+    //let mut rng = test_rng();
+    // let mut pre_sumcheck_fix_var_randomness = vec![C::ChallengeField::zero(); num_vars_product];
+    // for i in 0..num_vars_product {
+    //     pre_sumcheck_fix_var_randomness[i] = C::ChallengeField::random_unsafe(&mut rng);
+    // }
+
+    // Generate pre-sumcheck randomness via a commitment initialized transcript
+    let mut tp = Transcript::new();
+
+    // TODO: initialize transcript via the commitment to the private input matrix
+    for i in 0..mat1_mle.evals.len() {
+        tp.append_f::<C>(mat1_mle.evals[i]);
+    }
+    let pre_sumcheck_fix_var_randomness = tp.challenge_fs::<C>(num_vars_product);
+
+    let fix_vars_time = start_timer!(|| format!("Fix vars {}", num_vars_product));
+
+    // Split randomness into those required for mat1 and mat2
+    let (mat1_mle_fix_var_pt, mat2_mle_fix_var_pt) = pre_sumcheck_fix_var_randomness.split_at(mat1_num_var_rows_padded);
+    debug!("mat1_mle_fix_var_pt: {:?}", mat1_mle_fix_var_pt);
+    debug!("mat2_mle_fix_var_pt: {:?}", mat2_mle_fix_var_pt);
+
+    // Fix (MSB) variables of mat1
+    let mat1_mle_fixed = mat1_mle.fix_variables_multilinear_msb_first(mat1_mle_fix_var_pt);
+    debug!("mat1_mle_fixed: {:?}", mat1_mle_fixed.evals);
+
+    // Fix (LSB) variables of mat2
+    let mat2_mle_fixed = mat2_mle.fix_variables_multilinear_lsb_first(mat2_mle_fix_var_pt);
+    debug!("mat2_mle_fixed: {:?}", mat2_mle_fixed.evals);
+
+    end_timer!(fix_vars_time);
+
+    // Run sumcheck
+    let sumcheck_time = start_timer!(|| format!("Sumcheck {} vars", mat1_num_var_cols_padded));
+    let mut sp = SumcheckMultilinearProdScratchpad::<C>::new(&mat1_mle_fixed, &mat2_mle_fixed);
+
+    let (randomness_sumcheck, claimed_evals) = sumcheck_multilinear_prod(
+        &mut tp, 
+        &mut sp,
+    );
+
+    end_timer!(sumcheck_time);
+
+    info!("Sanity checks");
+    // Sanity check
+    let v1 = MultiLinearPoly::<C::Field>::eval_multilinear(
+        &mat1_mle_fixed.evals,
+        &randomness_sumcheck
+    );
+
+    // Sanity check
+    let v2 = MultiLinearPoly::<C::Field>::eval_multilinear(
+        &mat2_mle_fixed.evals,
+        &randomness_sumcheck
+    );
+
+    // Sanity check
+    info!("Computed ev: {:?}, {:?}", v1, v2);
+    info!("Claimed ev:  {:?}, {:?}", claimed_evals[0], claimed_evals[1]);
+    assert_eq!(claimed_evals[0], v1);
+    assert_eq!(claimed_evals[1], v2);
+
+    // Sanity check
+    let claimed_sum: C::Field = zip(&mat1_mle_fixed.evals, &mat2_mle_fixed.evals).map(|(a,b)| *a * *b).sum();
+    info!("Claimed Sum:  {:?}", claimed_sum);
+    debug!("Randomness generated during sumcheck:  {:?}", randomness_sumcheck);
+
+    return (randomness_sumcheck, claimed_evals, claimed_sum, tp.proof)
+
+
+}
+
+fn verify_matmul<C: GKRConfig>(
+    prod_mat: &Matrix<C::Field>, 
+    mat1: &Matrix<C::Field>, 
+    mat2: &Matrix<C::Field>,
+    randomness_sumcheck: &Vec<C::ChallengeField>, 
+    claimed_evals: &Vec<C::Field>, 
+    claimed_sum: &C::Field, 
+    proof: &Proof) 
+{
+    info!("Verifier - Matmult");
+    info!("Matrix to MLE");
+    // Convert Matrices to padded MLE
+    let (mat1_mle, mat1_num_var_rows_padded, mat1_num_var_cols_padded) 
+        = matrix_to_mle::<C>(mat1, false, false);
+    let (mat2_mle, mat2_num_var_rows_padded, mat2_num_var_cols_padded) 
+        = matrix_to_mle::<C>(mat2, false, false);
+
+    debug!("mat1_mle({}, {}): {:?}", 1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, mat1_mle.evals);
+    debug!("mat2_mle({}, {}): {:?}", 1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, mat2_mle.evals);
+
+    assert_eq!(mat1_num_var_cols_padded, mat2_num_var_rows_padded);
+
+    let prod_mat_num_rows = prod_mat.len();
+    let prod_mat_num_cols = prod_mat[0].len();
+
+    let (
+        prod_mat_mle, 
+        prod_mat_num_var_rows_padded, 
+        prod_mat_num_var_cols_padded
+    ) = matrix_to_mle::<C>(prod_mat, false, false);
+
+    debug!("prod_mat_mle({}, {}): {:?}", 1<<prod_mat_num_var_rows_padded, 1<<prod_mat_num_var_cols_padded, prod_mat_mle.evals);
+    let num_vars_product = prod_mat_num_var_rows_padded + prod_mat_num_var_cols_padded;
+
+
+    // Generate pre-sumcheck randomness
+    let mut tp = Transcript::new();
+
+    // TODO: initialize transcript via the commitment to the private input matrix
+    // TOOD: read the commitment from the proof
+    for i in 0..mat1_mle.evals.len() {
+        tp.append_f::<C>(mat1_mle.evals[i]);
+    }
+
+    let pre_sumcheck_fix_var_randomness = tp.challenge_fs::<C>(num_vars_product);
+
+    // Split pre-sumcheck randomness in two for rows and cols of prod mat mle
+    let (prod_mat_mle_rows_fix_var_pt, prod_mat_mle_cols_fix_var_pt) 
+        = pre_sumcheck_fix_var_randomness.split_at(prod_mat_num_var_rows_padded);
+    debug!("prod_mat_mle_rows_fix_var_pt: {:?}", prod_mat_mle_rows_fix_var_pt);
+    debug!("prod_mat_mle_cols_fix_var_pt: {:?}", prod_mat_mle_cols_fix_var_pt);
+
+    // Re-order randomness: row randomness was used in MSB first, and col randomness as LSB first
+    let mut randomness_for_prod_mat_mle = Vec::from(prod_mat_mle_cols_fix_var_pt.clone());
+    for r in prod_mat_mle_rows_fix_var_pt.iter().rev() {
+        randomness_for_prod_mat_mle.push(*r);
+    }
+
+    // LSB first full evaluation
+    let prod_mat_mle_evaluated = MultiLinearPoly::<C::Field>::eval_multilinear(
+        &prod_mat_mle.evals,
+        &randomness_for_prod_mat_mle
+    );
+
+    assert_eq!(prod_mat_mle_evaluated, *claimed_sum);
+
+
+    // Append pre-sumcheck randomness with Sumcheck randomness
+    // TODO: verify claimed sum
+    // let mut verified = false;
+    // let verifier = Verifier::<C>::default();
+    // verifier.verify_sumcheck(mat1_mle_fixed.var_num, &claimed_sum, &claimed_evals, &mut tp.proof, &mut verified);
+    // assert_eq!(verified, true);
+    // info!("Verified: true");
+
+}
+
+fn matrix_tests_big<C: GKRConfig>() {
+    info!("==============Product Inputs==================");
+    let mat1_num_rows: usize = 62;
+    let mat1_num_cols: usize = 512;
+
+    let mat2_num_rows: usize = 512;
+    let mat2_num_cols: usize = 512;
+
+    // let mat1_num_rows: usize = 2;
+    // let mat1_num_cols: usize = 3;
+
+    // let mat2_num_rows: usize = 3;
+    // let mat2_num_cols: usize = 3;
+
+    // Generate dummy matricess
+    let mat1 = get_dummy_mat::<C>(mat1_num_rows, mat1_num_cols);
+    let mat2 = get_dummy_mat::<C>(mat2_num_rows, mat2_num_cols);
+    debug!("mat1: {:?}", mat1);
+    debug!("mat2: {:?}", mat2);
+
+    // Compute product matrix
+    let prod_mat = multiply_mats::<C>(&mat1, &mat2);
+    debug!("prod_mat: {:?}", prod_mat);
+
+    let prod_mat_num_rows = prod_mat.len();
+    let prod_mat_num_cols = prod_mat[0].len();
+
+    info!("Malmut protocol for: {}x{}  *  {}x{} = {}x{}", 
+        mat1_num_rows, mat1_num_cols, 
+        mat2_num_rows, mat2_num_cols, 
+        prod_mat_num_rows, prod_mat_num_cols
+    );
+
+
+    let (
+        prod_mat_mle, 
+        prod_mat_num_var_rows_padded, 
+        prod_mat_num_var_cols_padded
+    ) = matrix_to_mle::<C>(&prod_mat, false, false);
+
+    debug!("prod_mat_mle({}, {}): {:?}", 1<<prod_mat_num_var_rows_padded, 1<<prod_mat_num_var_cols_padded, prod_mat_mle.evals);
+
+    let (randomness_sumcheck, claimed_evals, claimed_sum, proof) 
+        = prove_matmul::<C>(&mat1, &mat2);
+
+    verify_matmul::<C>(&prod_mat, &mat1, &mat2, &randomness_sumcheck, &claimed_evals, &claimed_sum, &proof);
+
+}
+
 #[allow(dead_code)]
 fn matrix_tests<C: GKRConfig>() {
     let num_rows: usize = 4;
@@ -224,7 +478,7 @@ fn matrix_tests<C: GKRConfig>() {
     debug!("mat_mle_norm picked: {:?}", mat_mle_norm_picked.evals);
 
 
-    debug!("==============Not using reverse and no transpose==================");
+    debug!("==============Product Sumcheck: Not using reverse and no transpose==================");
     let (mat_mle_msb, _, _) = matrix_to_mle::<C>(&mat, false, false);
     debug!("mat_mle_msb: {:?}", mat_mle_msb.evals);
     let (mat_mle_lsb, _, _) = matrix_to_mle::<C>(&mat, false, false);
@@ -475,7 +729,8 @@ fn main() {
     //simple_tests::<BN254Config>();
     // sumcheck_multilinear_prod_test::<BN254Config>(21);
 
-    matrix_tests::<BN254Config>();
+    //matrix_tests::<BN254Config>();
+    matrix_tests_big::<BN254Config>();
 
     // simple_tests::<M31ExtConfig>();
     // sumcheck_multilinear_prod_test::<M31ExtConfig>();

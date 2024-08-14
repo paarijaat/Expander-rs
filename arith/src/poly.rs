@@ -29,7 +29,7 @@ impl<F: Field + SimdField> MultiLinearPoly<F> {
     }
 
     pub fn fix_variables_multilinear_lsb_first(&self, partial_point: &[F::Scalar]) -> Self {
-        let timer = start_timer!(|| format!("fix variable mle with {} vars", partial_point.len()));
+        let timer = start_timer!(|| format!("fix variable lsb mle with {} vars", partial_point.len()));
         assert!(partial_point.len() <= self.var_num, "invalid size of partial point");
         let mut scratch = self.evals.to_vec();
         log::trace!("scratch({}): {:?}", scratch.len(), scratch[..scratch.len()].to_vec());
@@ -51,7 +51,7 @@ impl<F: Field + SimdField> MultiLinearPoly<F> {
     }
 
     pub fn fix_variables_multilinear_msb_first(&self, partial_point: &[F::Scalar]) -> Self {
-        let timer = start_timer!(|| format!("fix variable mle with {} vars", partial_point.len()));
+        let timer = start_timer!(|| format!("fix variable msb mle with {} vars", partial_point.len()));
         assert!(partial_point.len() <= self.var_num, "invalid size of partial point");
         let mut scratch = self.evals.to_vec();
         log::trace!("scratch({}): {:?}", scratch.len(), scratch[..scratch.len()].to_vec());
