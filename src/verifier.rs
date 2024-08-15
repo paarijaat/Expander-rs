@@ -267,11 +267,12 @@ impl<C: GKRConfig> Verifier<C> {
         claimed_sum: &C::Field,
         claimed_poly_evals: &[C::Field],
         proof: &mut Proof,
+        transcript: &mut Transcript,
         verified: &mut bool,
+        randomness_sumcheck: &mut Vec<C::ChallengeField>
     ) {
-        let mut transcript = Transcript::new();
         let mut verif = true;
-        let mut sum = *claimed_sum;
+        let mut sum: <C as GKRConfig>::Field = *claimed_sum;
 
 
         for _i in 0..num_vars {
@@ -282,14 +283,17 @@ impl<C: GKRConfig> Verifier<C> {
             transcript.append_f::<C>(p1);
             transcript.append_f::<C>(p2);
             
-            //log::trace!("i_var={} p0 p1 p2: {:?} {:?} {:?}", i, p0, p1, p2);
+            log::debug!("[verify_sumcheck] round {}, poly: {:?} {:?} {:?}", _i, p0, p1, p2);
 
             let r = transcript.challenge_f::<C>();
-
+            randomness_sumcheck.push(r);
+            log::debug!("[verify_sumcheck] round {}, randomness: {:?}", _i, r);
+            assert_eq!(sum, p0 + p1);
             verif &= sum == p0 + p1;
 
             sum = degree_2_eval(p0, p1, p2, r);
         }
+        assert_eq!(sum, claimed_poly_evals[0] * claimed_poly_evals[1]);
         verif &= sum == claimed_poly_evals[0] * claimed_poly_evals[1];
 
         transcript.append_f::<C>(claimed_poly_evals[0]);

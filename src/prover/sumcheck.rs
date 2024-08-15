@@ -110,6 +110,8 @@ pub fn sumcheck_multilinear_prod<C: GKRConfig>(
             sp.poly2.evals.as_mut_slice(),
         );
 
+        log::debug!("[sumcheck_multilinear_prod], round {} poly: {:?}", i_var, evals);
+
         // Append the poly sent to verifier to the transcript
         transcript.append_f::<C>(evals[0]);
         transcript.append_f::<C>(evals[1]);
@@ -117,6 +119,7 @@ pub fn sumcheck_multilinear_prod<C: GKRConfig>(
 
         // Create the next randomness (fiat-shamir)
         let r = transcript.challenge_f::<C>();
+        log::debug!("[sumcheck_multilinear_prod], round {} FS randomness: {:?}", i_var, r);
         randomness_sumcheck.push(r.clone());
 
         // Fix the next variable using the fiat-shamir randomness

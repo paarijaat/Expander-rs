@@ -169,30 +169,33 @@ fn multiply_mats<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>)
 }
 
 fn prove_matmul<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>)
-    -> (Vec<C::ChallengeField>, Vec<C::Field>, C::Field, Proof) 
+    -> (Vec<C::ChallengeField>, Vec<C::Field>, Proof) 
 {
-    info!("Prover - Matmult");
-    info!("Matrix to MLE");
+    let mle_creation_time = start_timer!(|| format!("mle_creation"));
+    // info!("[Prover] Matmult");
+    // info!("[Prover] Matrix to MLE");
     // Convert Matrices to padded MLE
     let (mat1_mle, mat1_num_var_rows_padded, mat1_num_var_cols_padded) 
         = matrix_to_mle::<C>(&mat1, false, false);
     let (mat2_mle, mat2_num_var_rows_padded, mat2_num_var_cols_padded) 
         = matrix_to_mle::<C>(&mat2, false, false);
 
-    debug!("mat1_mle({}, {}): {:?}", 1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, mat1_mle.evals);
-    debug!("mat2_mle({}, {}): {:?}", 1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, mat2_mle.evals);
+    // debug!("[Prover] mat1_mle({}, {}): {:?}", 1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, mat1_mle.evals);
+    // debug!("[Prover] mat2_mle({}, {}): {:?}", 1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, mat2_mle.evals);
 
     assert_eq!(mat1_num_var_cols_padded, mat2_num_var_rows_padded);
 
-    info!("Padded Matrices: {}x{}  *  {}x{} = {}x{}", 
-        1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, 
-        1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, 
-        1<<mat1_num_var_rows_padded, 1<<mat2_num_var_cols_padded
-    );
+    // info!("[Prover] Padded Matrices: {}x{}  *  {}x{} = {}x{}", 
+    //     1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, 
+    //     1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, 
+    //     1<<mat1_num_var_rows_padded, 1<<mat2_num_var_cols_padded
+    // );
 
-    info!("Sumcheck");
+    // info!("[Prover] Sumcheck");
 
     let num_vars_product = mat1_num_var_rows_padded + mat2_num_var_cols_padded;
+
+    end_timer!(mle_creation_time);
 
     // Generate pre-sumcheck randomness
     //let mut rng = test_rng();
@@ -201,6 +204,7 @@ fn prove_matmul<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>)
     //     pre_sumcheck_fix_var_randomness[i] = C::ChallengeField::random_unsafe(&mut rng);
     // }
 
+    let init_transcipt_time = start_timer!(|| format!("init_transcipt"));
     // Generate pre-sumcheck randomness via a commitment initialized transcript
     let mut tp = Transcript::new();
 
@@ -209,26 +213,29 @@ fn prove_matmul<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>)
         tp.append_f::<C>(mat1_mle.evals[i]);
     }
     let pre_sumcheck_fix_var_randomness = tp.challenge_fs::<C>(num_vars_product);
+    end_timer!(init_transcipt_time);
+
+    //debug!("[Prover] pre_sumcheck_fix_var_randomness: {:?}", pre_sumcheck_fix_var_randomness);
 
     let fix_vars_time = start_timer!(|| format!("Fix vars {}", num_vars_product));
 
     // Split randomness into those required for mat1 and mat2
     let (mat1_mle_fix_var_pt, mat2_mle_fix_var_pt) = pre_sumcheck_fix_var_randomness.split_at(mat1_num_var_rows_padded);
-    debug!("mat1_mle_fix_var_pt: {:?}", mat1_mle_fix_var_pt);
-    debug!("mat2_mle_fix_var_pt: {:?}", mat2_mle_fix_var_pt);
+    //debug!("[Prover] mat1_mle_fix_var_pt: {:?}", mat1_mle_fix_var_pt);
+    //debug!("[Prover] mat2_mle_fix_var_pt: {:?}", mat2_mle_fix_var_pt);
 
     // Fix (MSB) variables of mat1
     let mat1_mle_fixed = mat1_mle.fix_variables_multilinear_msb_first(mat1_mle_fix_var_pt);
-    debug!("mat1_mle_fixed: {:?}", mat1_mle_fixed.evals);
+    debug!("[Prover] mat1_mle_fixed (msb first): {:?}", mat1_mle_fixed.evals);
 
     // Fix (LSB) variables of mat2
     let mat2_mle_fixed = mat2_mle.fix_variables_multilinear_lsb_first(mat2_mle_fix_var_pt);
-    debug!("mat2_mle_fixed: {:?}", mat2_mle_fixed.evals);
+    debug!("[Prover] mat2_mle_fixed (lsb first): {:?}", mat2_mle_fixed.evals);
 
     end_timer!(fix_vars_time);
 
     // Run sumcheck
-    let sumcheck_time = start_timer!(|| format!("Sumcheck {} vars", mat1_num_var_cols_padded));
+    let sumcheck_time = start_timer!(|| format!("[Prover] Sumcheck {} vars", mat1_num_var_cols_padded));
     let mut sp = SumcheckMultilinearProdScratchpad::<C>::new(&mat1_mle_fixed, &mat2_mle_fixed);
 
     let (randomness_sumcheck, claimed_evals) = sumcheck_multilinear_prod(
@@ -238,89 +245,93 @@ fn prove_matmul<C: GKRConfig>(mat1: &Matrix<C::Field>, mat2: &Matrix<C::Field>)
 
     end_timer!(sumcheck_time);
 
-    info!("Sanity checks");
-    // Sanity check
-    let v1 = MultiLinearPoly::<C::Field>::eval_multilinear(
-        &mat1_mle_fixed.evals,
-        &randomness_sumcheck
-    );
+    info!("[Prover] Sanity checks");
+    // // Sanity check
+    // let v1 = MultiLinearPoly::<C::Field>::eval_multilinear(
+    //     &mat1_mle_fixed.evals,
+    //     &randomness_sumcheck
+    // );
+
+    // // Sanity check
+    // let v2 = MultiLinearPoly::<C::Field>::eval_multilinear(
+    //     &mat2_mle_fixed.evals,
+    //     &randomness_sumcheck
+    // );
 
     // Sanity check
-    let v2 = MultiLinearPoly::<C::Field>::eval_multilinear(
-        &mat2_mle_fixed.evals,
-        &randomness_sumcheck
-    );
+    // debug!("[Prover] [Sanity] Computed evals: {:?}, {:?}", v1, v2);
+    debug!("[Prover] [Sanity] Claimed evals:  {:?}, {:?}", claimed_evals[0], claimed_evals[1]);
+    // assert_eq!(claimed_evals[0], v1);
+    // assert_eq!(claimed_evals[1], v2);
 
     // Sanity check
-    info!("Computed ev: {:?}, {:?}", v1, v2);
-    info!("Claimed ev:  {:?}, {:?}", claimed_evals[0], claimed_evals[1]);
-    assert_eq!(claimed_evals[0], v1);
-    assert_eq!(claimed_evals[1], v2);
+    //let claimed_sum: C::Field = zip(&mat1_mle_fixed.evals, &mat2_mle_fixed.evals).map(|(a,b)| *a * *b).sum();
+    //debug!("[Prover] Claimed Sum:  {:?}", claimed_sum);
+    debug!("[Prover] randomness_sumcheck:  {:?}", randomness_sumcheck);
 
-    // Sanity check
-    let claimed_sum: C::Field = zip(&mat1_mle_fixed.evals, &mat2_mle_fixed.evals).map(|(a,b)| *a * *b).sum();
-    info!("Claimed Sum:  {:?}", claimed_sum);
-    debug!("Randomness generated during sumcheck:  {:?}", randomness_sumcheck);
-
-    return (randomness_sumcheck, claimed_evals, claimed_sum, tp.proof)
+    return (randomness_sumcheck, claimed_evals, tp.proof)
 
 
 }
 
 fn verify_matmul<C: GKRConfig>(
-    prod_mat: &Matrix<C::Field>, 
+    claimed_prod_mat: &Matrix<C::Field>, 
     mat1: &Matrix<C::Field>, 
     mat2: &Matrix<C::Field>,
-    randomness_sumcheck: &Vec<C::ChallengeField>, 
     claimed_evals: &Vec<C::Field>, 
-    claimed_sum: &C::Field, 
-    proof: &Proof) 
+    proof: &mut Proof) 
 {
-    info!("Verifier - Matmult");
-    info!("Matrix to MLE");
-    // Convert Matrices to padded MLE
+    info!("[Verifier] Matmult");
+    debug!("[Verifier] Matrix to MLE");
+
+    // Convert Input Matrices to padded MLE
     let (mat1_mle, mat1_num_var_rows_padded, mat1_num_var_cols_padded) 
         = matrix_to_mle::<C>(mat1, false, false);
     let (mat2_mle, mat2_num_var_rows_padded, mat2_num_var_cols_padded) 
         = matrix_to_mle::<C>(mat2, false, false);
 
-    debug!("mat1_mle({}, {}): {:?}", 1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, mat1_mle.evals);
-    debug!("mat2_mle({}, {}): {:?}", 1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, mat2_mle.evals);
+    debug!("[Verifier] mat1_mle({}, {}): {:?}", 1<<mat1_num_var_rows_padded, 1<<mat1_num_var_cols_padded, mat1_mle.evals);
+    debug!("[Verifier] mat2_mle({}, {}): {:?}", 1<<mat2_num_var_rows_padded, 1<<mat2_num_var_cols_padded, mat2_mle.evals);
 
     assert_eq!(mat1_num_var_cols_padded, mat2_num_var_rows_padded);
 
-    let prod_mat_num_rows = prod_mat.len();
-    let prod_mat_num_cols = prod_mat[0].len();
-
+    // Convert product matrix to MLE
     let (
         prod_mat_mle, 
         prod_mat_num_var_rows_padded, 
         prod_mat_num_var_cols_padded
-    ) = matrix_to_mle::<C>(prod_mat, false, false);
+    ) = matrix_to_mle::<C>(claimed_prod_mat, false, false);
 
-    debug!("prod_mat_mle({}, {}): {:?}", 1<<prod_mat_num_var_rows_padded, 1<<prod_mat_num_var_cols_padded, prod_mat_mle.evals);
+    debug!("[Verifier] prod_mat_mle({}, {}): {:?}", 1<<prod_mat_num_var_rows_padded, 1<<prod_mat_num_var_cols_padded, prod_mat_mle.evals);
     let num_vars_product = prod_mat_num_var_rows_padded + prod_mat_num_var_cols_padded;
 
 
-    // Generate pre-sumcheck randomness
-    let mut tp = Transcript::new();
+    // Create empty Transcript object to generate pre-sumcheck randomness independently
+    let mut tp_verifier = Transcript::new();
 
-    // TODO: initialize transcript via the commitment to the private input matrix
+    // TODO: initialize transcript via the commitment to the private input matrix (A)
     // TOOD: read the commitment from the proof
-    for i in 0..mat1_mle.evals.len() {
-        tp.append_f::<C>(mat1_mle.evals[i]);
+    // For the time being initialize Transcript with all the value of Padded Mat A's MLE
+    for _i in 0..mat1_mle.evals.len() {
+        let mat1_mle_eval_from_proof: C::Field = proof.get_next_and_step();
+        // assert_eq!(mat1_mle_eval_from_proof, mat1_mle.evals[i]);
+        tp_verifier.append_f::<C>(mat1_mle_eval_from_proof);  
     }
 
-    let pre_sumcheck_fix_var_randomness = tp.challenge_fs::<C>(num_vars_product);
+    // Generate pre-sumcheck randomness via the initialized Transcript
+    let pre_sumcheck_fix_var_randomness = tp_verifier.challenge_fs::<C>(num_vars_product);
+    debug!("[Verifier] pre_sumcheck_fix_var_randomness: {:?}", pre_sumcheck_fix_var_randomness);
 
-    // Split pre-sumcheck randomness in two for rows and cols of prod mat mle
+    // Split pre-sumcheck randomness in two for rows and cols of the prod_mat
     let (prod_mat_mle_rows_fix_var_pt, prod_mat_mle_cols_fix_var_pt) 
         = pre_sumcheck_fix_var_randomness.split_at(prod_mat_num_var_rows_padded);
-    debug!("prod_mat_mle_rows_fix_var_pt: {:?}", prod_mat_mle_rows_fix_var_pt);
-    debug!("prod_mat_mle_cols_fix_var_pt: {:?}", prod_mat_mle_cols_fix_var_pt);
+    debug!("[Verifier] prod_mat_mle_rows_fix_var_pt: {:?}", prod_mat_mle_rows_fix_var_pt);
+    debug!("[Verifier] prod_mat_mle_cols_fix_var_pt: {:?}", prod_mat_mle_cols_fix_var_pt);
 
-    // Re-order randomness: row randomness was used in MSB first, and col randomness as LSB first
-    let mut randomness_for_prod_mat_mle = Vec::from(prod_mat_mle_cols_fix_var_pt.clone());
+    // Reverse row randomness and concatenate to col randomness, to create LSB first randomness
+    // prover used row randomness in MSB first form while fixing mat1 mle
+    // prover used col randomness in LSB first form while fixing mat2 mle
+    let mut randomness_for_prod_mat_mle = Vec::from(prod_mat_mle_cols_fix_var_pt);
     for r in prod_mat_mle_rows_fix_var_pt.iter().rev() {
         randomness_for_prod_mat_mle.push(*r);
     }
@@ -331,16 +342,65 @@ fn verify_matmul<C: GKRConfig>(
         &randomness_for_prod_mat_mle
     );
 
-    assert_eq!(prod_mat_mle_evaluated, *claimed_sum);
+    // Check if claimed_sum matches the prod_mat_mle evaluated at independently generated pre-sumcheck randomness
+    let claimed_sum: C::Field = prod_mat_mle_evaluated;
+    info!("[Verifier] claimed sum: {:?}", claimed_sum);
+    info!("[Verifier]                [Still to check] if the claimed product mat was correctly computed.");
+
+    // Now run sumcheck verifier, and independently obtain sumcheck randomness
+    let mut verified = false;
+    let verifier = Verifier::<C>::default();
+    let mut randomness_sc_verifier: Vec<C::ChallengeField> = Vec::new();
+
+    verifier.verify_sumcheck(
+        mat1_num_var_cols_padded, 
+        &claimed_sum, 
+        claimed_evals, 
+        &mut proof.clone(), 
+        &mut tp_verifier, 
+        &mut verified,
+        &mut randomness_sc_verifier
+    );
+
+    debug!("[Verifier] After sumcheck verifier randomness: {:?}", randomness_sc_verifier);
+    assert_eq!(verified, true);
+    info!("[Verifier] Verified TRUE: Sumcheck messages correctly formed");
+    info!("[Verifier]      ==> Claimed sum == round_1_poly(0) + round_1_poly(1)");
+    info!("[Verifier]          and All subsequent round polys correctly formed");
+    info!("[Verifier]      ==> Checking of claimed sum correctly reduced to checking the two claimed input mat evals");
+    info!("[Verifier]      ==> Checking of claimed product correctly reduced to checking the two claimed  input mat evals");
+
+    // Check input mat1 claimed eval
+    // TODO here verify PCS opening proof, since verifier won't know the raw mat1
+    let mut randomness_for_mat1_mle = Vec::from(randomness_sc_verifier.clone());
+    for r in prod_mat_mle_rows_fix_var_pt.iter().rev() {
+        randomness_for_mat1_mle.push(*r);
+    }
+
+    let mat1_mle_evaluated = MultiLinearPoly::<C::Field>::eval_multilinear(
+        &mat1_mle.evals,
+        &randomness_for_mat1_mle
+    );
+    assert_eq!(claimed_evals[0], mat1_mle_evaluated);
+    info!("[Verifier] Verified TRUE: claimed_eval[0] == input mat1 evaluated at independently generated randomness");
+    info!("[Verifier]                randomness = (during sumcheck randomness lsb first) concat reverse(pre-sumcheck row randomness msb first)");
 
 
-    // Append pre-sumcheck randomness with Sumcheck randomness
-    // TODO: verify claimed sum
-    // let mut verified = false;
-    // let verifier = Verifier::<C>::default();
-    // verifier.verify_sumcheck(mat1_mle_fixed.var_num, &claimed_sum, &claimed_evals, &mut tp.proof, &mut verified);
-    // assert_eq!(verified, true);
-    // info!("Verified: true");
+    // Check input mat2 claimed eval
+    let mut randomness_for_mat2_mle = Vec::from(prod_mat_mle_cols_fix_var_pt);
+    for r in randomness_sc_verifier.iter() {
+        randomness_for_mat2_mle.push(*r);
+    }
+
+    let mat2_mle_evaluated = MultiLinearPoly::<C::Field>::eval_multilinear(
+        &mat2_mle.evals,
+        &randomness_for_mat2_mle
+    );
+    assert_eq!(claimed_evals[1], mat2_mle_evaluated);
+    info!("[Verifier] Verified TRUE: claimed_eval[1] == input mat2 evaluated at independently generated randomness");
+    info!("[Verifier]                randomness = (pre-sumcheck col randomness lsb first) | (during sumcheck randomness lsb first)");
+
+
 
 }
 
@@ -364,32 +424,43 @@ fn matrix_tests_big<C: GKRConfig>() {
     debug!("mat1: {:?}", mat1);
     debug!("mat2: {:?}", mat2);
 
-    // Compute product matrix
-    let prod_mat = multiply_mats::<C>(&mat1, &mat2);
-    debug!("prod_mat: {:?}", prod_mat);
-
-    let prod_mat_num_rows = prod_mat.len();
-    let prod_mat_num_cols = prod_mat[0].len();
-
-    info!("Malmut protocol for: {}x{}  *  {}x{} = {}x{}", 
+    // Display info
+    let matmul_info = format!("Matmult for: {}x{}  *  {}x{} = {}x{}", 
         mat1_num_rows, mat1_num_cols, 
         mat2_num_rows, mat2_num_cols, 
-        prod_mat_num_rows, prod_mat_num_cols
+        mat1_num_rows, mat2_num_cols
     );
+    info!("{}", matmul_info);
 
-
-    let (
-        prod_mat_mle, 
-        prod_mat_num_var_rows_padded, 
-        prod_mat_num_var_cols_padded
-    ) = matrix_to_mle::<C>(&prod_mat, false, false);
-
-    debug!("prod_mat_mle({}, {}): {:?}", 1<<prod_mat_num_var_rows_padded, 1<<prod_mat_num_var_cols_padded, prod_mat_mle.evals);
-
-    let (randomness_sumcheck, claimed_evals, claimed_sum, proof) 
+    let prove_matmul_time = start_timer!(|| format!("[Prover] Prove {}", matmul_info));
+    // Run sumcheck (even without computing the product!)
+    let (randomness_sc_prover, claimed_evals, proof) 
         = prove_matmul::<C>(&mat1, &mat2);
 
-    verify_matmul::<C>(&prod_mat, &mat1, &mat2, &randomness_sumcheck, &claimed_evals, &claimed_sum, &proof);
+    end_timer!(prove_matmul_time);
+
+    let perform_matmul_time = start_timer!(|| format!("[Prover] Do {}", matmul_info));
+    // Compute product matrix
+    let prod_mat = multiply_mats::<C>(&mat1, &mat2);
+    end_timer!(perform_matmul_time);
+    debug!("[Prover] prod_mat: {:?}", prod_mat);
+
+
+    // let (
+    //     prod_mat_mle, 
+    //     prod_mat_num_var_rows_padded, 
+    //     prod_mat_num_var_cols_padded
+    // ) = matrix_to_mle::<C>(&prod_mat, false, false);
+    // debug!("prod_mat_mle({}, {}): {:?}", 1<<prod_mat_num_var_rows_padded, 1<<prod_mat_num_var_cols_padded, prod_mat_mle.evals);
+
+
+
+    // Verify matmul. This would verify:
+    //  1. 'Proof' contains correct sumcheck messages
+    //  2. 'claimed_sum' matches the product mle evaluation (at pre-sumcheck randomness independently generated by verifier)
+    //  3. 'claimed_evals' match the input matrix evaluations (at the concatenation of pre-sumcheck rand + sumcheck rand independently generated by verifier)
+    // TODO: mat1 should not be passed to verifier, as it is private. Only the PCS commitment and opening proof should be passed
+    verify_matmul::<C>(&prod_mat, &mat1, &mat2, &claimed_evals, &mut proof.clone());
 
 }
 
@@ -523,13 +594,23 @@ fn matrix_tests<C: GKRConfig>() {
 
     let mut verified = false;
     let verifier = Verifier::<C>::default();
-    verifier.verify_sumcheck(mat_mle_msb_picked.var_num, &sum, &claimed_evals, &mut tp.proof, &mut verified);
+    let mut tp_verifier = Transcript::new();
+    let mut randomness_sc_verifier: Vec<C::ChallengeField> = Vec::new();
+    verifier.verify_sumcheck(
+        mat_mle_msb_picked.var_num, 
+        &sum, 
+        &claimed_evals, 
+        &mut tp.proof, 
+        &mut tp_verifier, 
+        &mut verified, 
+        &mut randomness_sc_verifier
+    );
     assert_eq!(verified, true);
     info!("Verified: true");
 
 
     let mut randomness_for_msb_initiated_poly = fix_var_pt.clone();
-    for r in randomness_sumcheck.iter().rev() {
+    for r in randomness_sc_verifier.iter().rev() {
         randomness_for_msb_initiated_poly.push(*r);
     }
 
@@ -548,7 +629,7 @@ fn matrix_tests<C: GKRConfig>() {
 
 
     let mut randomness_for_lsb_initiated_poly = fix_var_pt.clone();
-    for r in randomness_sumcheck.iter() {
+    for r in randomness_sc_verifier.iter() {
         randomness_for_lsb_initiated_poly.push(*r);
     }
     let v2_from_orig_lsb_poly = MultiLinearPoly::<C::Field>::eval_multilinear(
@@ -628,7 +709,9 @@ fn sumcheck_multilinear_prod_test<C: GKRConfig>(num_vars: usize) {
 
     let mut verified = false;
     let verifier = Verifier::<C>::default();
-    verifier.verify_sumcheck(num_vars, &sum, &claimed_evals, &mut tp.proof, &mut verified);
+    let mut tp_verifier = Transcript::new();
+    let mut randomness_sc_verifier: Vec<C::ChallengeField> = Vec::new();
+    verifier.verify_sumcheck(num_vars, &sum, &claimed_evals, &mut tp.proof, &mut tp_verifier, &mut verified, &mut randomness_sc_verifier);
     assert_eq!(verified, true);
     info!("Verified: true");
 
